@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Focus a Herdr agent and raise the Herdr terminal window.
+
+Usage: omarchy-herdr-focus <target>
+
+The target is anything ``herdr agent focus`` accepts: a unique live agent
+name or the pane id currently hosting the agent.
+
+Two steps:
+
+1. ``herdr agent focus <target>`` moves focus inside the Herdr TUI to the
+   agent's workspace, tab, and pane.
+2. The Herdr window is located among the compositor's clients (a terminal
+   whose process tree runs ``herdr``) and raised with a Hyprland 0.56
+   dispatch. Focusing a window on another workspace switches the active
+   Hyprland workspace to it, so this works from anywhere on the desktop.
+
+When the window cannot be found (headless/remote Herdr, or no Hyprland
+session) step 2 is skipped; the in-TUI focus has already been applied.
+
+Exit codes: 0 success, 1 herdr or hyprctl failure, 2 usage error.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+HERDR = os.environ.get("HERDR_BIN", "herdr")
+HYPRCTL = os.environ.get("HYPRCTL_BIN", "hyprctl")
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def focus_in_herdr(target):
+    out = run([HERDR, "agent", "focus", target])
+    if out.returncode != 0:
+        detail = "\n".join(part.strip() for part in (out.stdout, out.stderr) if part.strip())
+        return False, detail or "herdr agent focus failed"
+    return True, ""
+
+
+def process_has_herdr(pid):
+    """True if the process tree rooted at pid contains a process named herdr."""
+    seen = set()
+    stack = [pid]
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            with open(f"/proc/{current}/comm", encoding="utf-8") as handle:
+                comm = handle.read().strip()
+        except OSError:
+            continue
+        if comm == "herdr":
+            return True
+        try:
+            with open(f"/proc/{current}/task/{current}/children", encoding="utf-8") as handle:
+                stack.extend(int(child) for child in handle.read().split())
+        except OSError:
+            continue
+    return False
+
+
+def find_herdr_window(clients, is_herdr_window=process_has_herdr):
+    """Return the address of the first client window whose process tree runs herdr."""
+    for client in clients or []:
+        pid = client.get("pid")
+        address = client.get("address")
+        if pid and address and is_herdr_window(pid):
+            return address
+    return None
+
+
+def hyprctl_clients():
+    out = run([HYPRCTL, "-j", "clients"])
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def raise_window(address):
+    # Hyprland 0.56+ dispatch API: focus a window by address. If the window
+    # lives on another workspace the active workspace switches to it.
+    out = run([HYPRCTL, "dispatch", f'hl.dsp.focus({{ window = "address:{address}" }})'])
+    if out.returncode != 0:
+        detail = "\n".join(part.strip() for part in (out.stdout, out.stderr) if part.strip())
+        return False, detail or f"hyprctl dispatch failed for {address}"
+    return True, ""
+
+
+def main(argv):
+    if len(argv) != 1 or not argv[0].strip():
+        print(__doc__, file=sys.stderr)
+        return 2
+    target = argv[0].strip()
+
+    ok, detail = focus_in_herdr(target)
+    if not ok:
+        print(f"omarchy-herdr-focus: {detail}", file=sys.stderr)
+        return 1
+
+    clients = hyprctl_clients()
+    if clients is None:
+        # Not running under Hyprland; the in-TUI focus is all we can do.
+        return 0
+
+    address = find_herdr_window(clients)
+    if address is None:
+        # Headless/remote Herdr; there is no local window to raise.
+        return 0
+
+    ok, detail = raise_window(address)
+    if not ok:
+        print(f"omarchy-herdr-focus: {detail}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

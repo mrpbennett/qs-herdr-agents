@@ -1,0 +1,57 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test, coverage, and profiling output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+*.py,cover
+*.prof
+
+# Qt Creator, QML cache, and generated build output
+*.qmlc
+*.jsc
+.qmake.stash
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+.qtc_clangd/
+Debug/
+Release/
+debug/
+release/
+build/
+build-*/
+
+# Local runtime and diagnostic files
+*.log
+*.pid
+*.pid.lock
+*.tmp
+*.temp
+
+# Editor and operating-system metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

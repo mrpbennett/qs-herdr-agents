@@ -10,20 +10,30 @@ what it is doing right now, and the Herdr workspace it is working in. Click an
 agent and you land on it inside Herdr — no matter which desktop or window you
 are looking at.
 
-## What it shows
+## What it does
 
-- **Bar icon** — a static sheep glyph tinted by fleet state:
-  - **accent** while any agent is working,
-  - **urgent** when any agent needs attention,
-  - a **count badge** of busy agents (working / blocked / done).
-- **Panel** — one row per agent:
-  - status dot + label (`WORKING`, `BLOCKED`, `DONE`, `IDLE`, `UNKNOWN`),
-  - agent name,
-  - the agent's **current activity** (its live terminal title),
-  - the **Herdr workspace** it is in, and the project folder,
-  - a `FOCUSED` mark on the agent currently under the Herdr cursor.
+The plugin adds two things to your Omarchy bar:
 
-## Click to jump
+1. **Bar icon** — a static sheep glyph tinted by fleet state:
+   - **accent** while any agent is working,
+   - **urgent** when any agent needs attention,
+   - a **count badge** of busy agents (working / blocked / done).
+
+2. **Panel** — click the icon to open a list, one row per agent:
+   - status dot + label (`WORKING`, `BLOCKED`, `DONE`, `IDLE`, `UNKNOWN`),
+   - agent name,
+   - the agent's **current activity** (its live terminal title),
+   - the **Herdr workspace** it is in, and the project folder,
+   - a `FOCUSED` mark on the agent currently under the Herdr cursor.
+
+### Notifications
+
+Desktop toasts when agents change state (both toggleable in plugin settings):
+
+- **Needs attention** — an agent entered `blocked` and is waiting for input.
+- **Finished** — a working agent transitioned to `done` (background work done).
+
+### Click to jump
 
 Click (or keyboard-Enter) an agent row and the plugin:
 
@@ -32,13 +42,6 @@ Click (or keyboard-Enter) an agent row and the plugin:
 
 The active Hyprland workspace follows the Herdr window, so the jump works from
 anywhere on the desktop.
-
-## Notifications
-
-Desktop toasts when agents change state (both toggleable in plugin settings):
-
-- **Needs attention** — an agent entered `blocked` and is waiting for input.
-- **Finished** — a working agent transitioned to `done` (background work done).
 
 ## Settings
 
@@ -64,11 +67,46 @@ helper executable, rescans the shell, and places the widget in the right bar
 section. The shell hot-reloads; if the icon does not appear, run
 `omarchy restart shell`.
 
+**The installer will not overwrite an existing plugin.** If a different plugin
+is already linked at the same path, the install fails with an error and leaves
+your configuration untouched.
+
 ## Uninstall
 
 ```sh
 ./uninstall.sh
 ```
+
+This disables the plugin, removes the symlink (if it points to this project),
+and rescans the shell. Your `shell.json` is left otherwise intact — no other
+plugin or setting is touched.
+
+### Complete removal
+
+If you want to fully remove every trace of the plugin from your system:
+
+1. **Run the uninstall script** (removes the symlink and disables the plugin):
+
+   ```sh
+   ./uninstall.sh
+   ```
+
+2. **Remove the cloned repository** (the source code on disk):
+
+   ```sh
+   rm -rf /home/pb/Projects/qs-herdr-agents
+   ```
+
+   Or wherever you cloned it.
+
+3. **Restart the shell** (optional, picks up the change immediately):
+
+   ```sh
+   omarchy restart shell
+   ```
+
+After these steps the plugin is gone: no symlink in `~/.config/omarchy/plugins/`,
+no entry in `shell.json`, and no source files on disk.
 
 ## Development
 
@@ -91,5 +129,3 @@ One call per poll — `herdr api snapshot` — returns every agent (state,
 current activity title, cwd, pane id) and every workspace (label) from the
 running Herdr server. See `docs/design.md` for the details and the verified
 Hyprland 0.56 focus mechanics.
-
-# qs-herdr-agents

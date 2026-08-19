@@ -68,10 +68,6 @@ anywhere on the desktop.
 - No non-stdlib QML imports beyond Quickshell and the Omarchy shell's own
   `qs.Commons` / `qs.Ui` modules.
 
-## License
-
-MIT — see [LICENSE](./LICENSE).
-
 ## Install
 
 The standard way to install an Omarchy plugin, straight from the repo:
@@ -148,3 +144,7 @@ One call per poll — `herdr api snapshot` — returns every agent (state,
 current activity title, cwd, pane id) and every workspace (label) from the
 running Herdr server. See `docs/design.md` for the details and the verified
 Hyprland 0.56 focus mechanics.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

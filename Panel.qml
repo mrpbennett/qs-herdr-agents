@@ -202,7 +202,7 @@ Panel {
             meta: root.statusText()
             detail: service.error !== "" && !service.connected
               ? service.error
-              : (service.connected ? "Live session snapshot" : "Waiting for Herdr…")
+              : (service.connected ? "Active" : "Waiting for Herdr…")
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
@@ -302,7 +302,7 @@ Panel {
             visible: service.connected && service.agentCount > 0
             width: parent.width
             topPadding: Style.space(2)
-            text: "Click an agent to jump to it · r refreshes"
+            text: "Click an agent to leap to it · r refreshes"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

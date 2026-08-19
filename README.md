@@ -1,5 +1,7 @@
 # Herdr Agents
 
+![herdr-agents](./assets/herdragents.png)
+
 A live agent-status widget for the [Omarchy](https://omarchy.org/) bar that
 watches your [Herdr](https://herdr.dev) session.
 
@@ -89,4 +91,5 @@ One call per poll — `herdr api snapshot` — returns every agent (state,
 current activity title, cwd, pane id) and every workspace (label) from the
 running Herdr server. See `docs/design.md` for the details and the verified
 Hyprland 0.56 focus mechanics.
+
 # qs-herdr-agents

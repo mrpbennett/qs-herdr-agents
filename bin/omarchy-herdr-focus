@@ -103,24 +103,24 @@ def main(argv):
     target = argv[0].strip()
 
     ok, detail = focus_in_herdr(target)
+    herdr_ok = ok
     if not ok:
-        print(f"omarchy-herdr-focus: {detail}", file=sys.stderr)
-        return 1
+        print(f"omarchy-herdr-focus: herdr focus: {detail}", file=sys.stderr)
 
     clients = hyprctl_clients()
     if clients is None:
         # Not running under Hyprland; the in-TUI focus is all we can do.
-        return 0
+        return 0 if herdr_ok else 1
 
     address = find_herdr_window(clients)
     if address is None:
         # Headless/remote Herdr; there is no local window to raise.
-        return 0
+        return 0 if herdr_ok else 1
 
     ok, detail = raise_window(address)
     if not ok:
         print(f"omarchy-herdr-focus: {detail}", file=sys.stderr)
-        return 1
+        return 1 if not herdr_ok else 0
     return 0
 
 

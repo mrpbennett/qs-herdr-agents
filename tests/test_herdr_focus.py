@@ -77,10 +77,19 @@ class MainTest(unittest.TestCase):
             self.assertEqual(MOD.main([]), 2)
             self.assertEqual(MOD.main([""]), 2)
 
-    def test_focus_failure_exits_1(self):
+    def test_focus_failure_exits_1_when_no_hyprland(self):
         with mock.patch.object(MOD, "focus_in_herdr", return_value=(False, "boom")), \
+             mock.patch.object(MOD, "hyprctl_clients", return_value=None), \
              mock.patch.object(sys, "stderr", new=io.StringIO()):
             self.assertEqual(MOD.main(["w1:p1"]), 1)
+
+    def test_focus_failure_ok_when_hyprland_raises(self):
+        with mock.patch.object(MOD, "focus_in_herdr", return_value=(False, "boom")), \
+             mock.patch.object(MOD, "hyprctl_clients", return_value=[]), \
+             mock.patch.object(MOD, "find_herdr_window", return_value="0x42"), \
+             mock.patch.object(MOD, "raise_window", return_value=(True, "")), \
+             mock.patch.object(sys, "stderr", new=io.StringIO()):
+            self.assertEqual(MOD.main(["w1:p1"]), 0)
 
     def test_ok_without_hyprland(self):
         with mock.patch.object(MOD, "focus_in_herdr", return_value=(True, "")), \
@@ -100,8 +109,16 @@ class MainTest(unittest.TestCase):
              mock.patch.object(MOD, "raise_window", return_value=(True, "")):
             self.assertEqual(MOD.main(["w1:p1"]), 0)
 
-    def test_raise_failure_exits_1(self):
+    def test_raise_failure_exits_0_when_focus_ok(self):
         with mock.patch.object(MOD, "focus_in_herdr", return_value=(True, "")), \
+             mock.patch.object(MOD, "hyprctl_clients", return_value=[]), \
+             mock.patch.object(MOD, "find_herdr_window", return_value="0x42"), \
+             mock.patch.object(MOD, "raise_window", return_value=(False, "nope")), \
+             mock.patch.object(sys, "stderr", new=io.StringIO()):
+            self.assertEqual(MOD.main(["w1:p1"]), 0)
+
+    def test_raise_failure_exits_1_when_focus_also_failed(self):
+        with mock.patch.object(MOD, "focus_in_herdr", return_value=(False, "boom")), \
              mock.patch.object(MOD, "hyprctl_clients", return_value=[]), \
              mock.patch.object(MOD, "find_herdr_window", return_value="0x42"), \
              mock.patch.object(MOD, "raise_window", return_value=(False, "nope")), \

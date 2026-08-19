@@ -77,15 +77,6 @@ workspace changes. If Hyprland is unavailable or no local window runs herdr
 (headless server, `--remote` attach), steps 2–3 are skipped and the in-TUI
 focus still applies.
 
-## Install / uninstall
-
-`install.sh` symlinks the project into
-`~/.config/omarchy/plugins/mrpbennett.herdr-agents`, chmods the helper, runs
-`omarchy-shell shell rescanPlugins`, and enables the widget in the right bar
-section via `omarchy plugin enable`. `uninstall.sh` disables the plugin,
-removes only the symlink (verifying its target), and rescans. Neither script
-touches the rest of `shell.json`; both are idempotent.
-
 ## Known limitations
 
 - One Herdr window: if several terminal windows each run a `herdr` process,

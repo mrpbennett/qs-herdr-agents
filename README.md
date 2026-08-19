@@ -56,39 +56,58 @@ anywhere on the desktop.
 - [Herdr](https://herdr.dev) — the plugin polls `herdr api snapshot`.
 - Omarchy with the Quickshell bar.
 
+## Dependencies
+
+- `herdr` — shelled out to for `herdr api snapshot` (polling) and
+  `herdr agent focus <pane>` (click-to-jump). No network calls; both talk to
+  the local Herdr server only.
+- `hyprctl` — shelled out to by `bin/omarchy-herdr-focus` to locate and raise
+  the Herdr window via a Hyprland dispatch.
+- `python3` — runs `bin/omarchy-herdr-focus`, a stdlib-only script (no pip
+  packages required).
+- No non-stdlib QML imports beyond Quickshell and the Omarchy shell's own
+  `qs.Commons` / `qs.Ui` modules.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
 ## Install
 
+The standard way to install an Omarchy plugin, straight from the repo:
+
 ```sh
-./install.sh
+omarchy plugin add https://github.com/mrpbennett/qs-herdr-agents.git --enable
 ```
 
-This symlinks the plugin into `~/.config/omarchy/plugins/`, makes the focus
-helper executable, rescans the shell, and places the widget in the right bar
-section. The shell hot-reloads; if the icon does not appear, run
+This clones the plugin into `~/.config/omarchy/plugins/`, validates the
+manifest, rescans the shell, and enables the widget in the right bar section.
+The shell hot-reloads; if the icon does not appear, run
 `omarchy restart shell`.
 
-**The installer will not overwrite an existing plugin.** If a different plugin
-is already linked at the same path, the install fails with an error and leaves
-your configuration untouched.
+## Update
+
+```sh
+omarchy plugin update mrpbennett.herdr-agents
+```
 
 ## Uninstall
 
 ```sh
-./uninstall.sh
+omarchy plugin remove mrpbennett.herdr-agents
 ```
 
-This disables the plugin, removes the symlink (if it points to this project),
-and rescans the shell. Your `shell.json` is left otherwise intact — no other
-plugin or setting is touched.
+This disables the plugin and removes it from `~/.config/omarchy/plugins/`,
+leaving the rest of your `shell.json` untouched.
 
 ### Complete removal
 
 If you want to fully remove every trace of the plugin from your system:
 
-1. **Run the uninstall script** (removes the symlink and disables the plugin):
+1. **Remove the plugin** (disables it and removes the installed copy):
 
    ```sh
-   ./uninstall.sh
+   omarchy plugin remove mrpbennett.herdr-agents
    ```
 
 2. **Remove the cloned repository** (the source code on disk):
@@ -105,8 +124,8 @@ If you want to fully remove every trace of the plugin from your system:
    omarchy restart shell
    ```
 
-After these steps the plugin is gone: no symlink in `~/.config/omarchy/plugins/`,
-no entry in `shell.json`, and no source files on disk.
+After these steps the plugin is gone: no entry in `~/.config/omarchy/plugins/`,
+nothing enabled in `shell.json`, and no source files on disk.
 
 ## Development
 

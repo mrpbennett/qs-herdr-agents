@@ -1,6 +1,6 @@
 # Herdr Agents
 
-![herdr-agents](./assets/herdragents.png)
+![herdr-agents](preview.png)
 
 A live agent-status widget for the [Omarchy](https://omarchy.org/) bar that
 watches your [Herdr](https://herdr.dev) session.

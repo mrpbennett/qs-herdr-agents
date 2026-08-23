@@ -29,7 +29,8 @@ A `Timer` runs a `Process` that executes `herdr api snapshot`. The interval is
 `refreshIntervalSec` (default 2s) normally, tightened to 1s while the panel is
 open. The `Process` guards on `running` so a poll can never overlap itself. On
 failure (server down, herdr missing) the plugin flips `connected = false`,
-drops its baseline, and reports the error; the next successful poll re-baselines.
+drops its baseline, zeroes its counts (so the bar badge cannot go stale), and
+reports the error; the next successful poll re-baselines.
 
 ## Notifications
 
@@ -39,48 +40,94 @@ Only real transitions notify, gated by settings and a first-poll baseline:
 | --- | --- | --- |
 | any → `blocked` | "needs attention" | `critical` |
 | `working` → `done` | "finished" | `normal` |
+| blocked pane vanishes between polls | "agent gone" | `normal` |
+
+The pane-vanish case covers an agent that is dealt with (or dies) entirely
+between two polls: the diff loop also walks previous panes missing from the
+current snapshot. Only previously-blocked agents announce this — a working
+agent disappearing usually means its tab was closed on purpose.
 
 `working → idle` intentionally does not toast: `idle` after a turn usually
 means the tab is seen, so the user is already watching. `done` is the unseen
 background-work completion herdr reports, which is the case worth a toast.
 
-Toasts are emitted with `Quickshell.execDetached([...omarchy-notification-send,
-headline, body, "-g", "󰳆", "-u", urgency])` so they render in the Omarchy
-notification service like every other first-party toast.
+Toasts are emitted with
+`Quickshell.execDetached([...omarchy-notification-send, headline, body, "-g", "󰳆", "-u", urgency])`
+so they render in the Omarchy notification service like every other
+first-party toast. The state toasts additionally pass
+`--exec "'<focus-helper>' '<paneId>'"`; Omarchy runs that command when the
+toast itself is clicked, so a click on "needs attention" jumps straight to
+the agent.
 
 ## Model sync
 
 The agent `ListModel` is updated in place: panes no longer present are removed,
 new panes appended, and existing rows have their roles mutated. This preserves
-the panel's scroll offset and keyboard cursor across 2s polls. The `Repeater`
-in `Panel.qml` binds roles (`name`, `status`, `title`, `folder`,
+the panel's scroll offset and keyboard cursor across 2s polls. After syncing,
+`resortModel()` performs a stable partition via `ListModel.move()` so blocked
+rows sit at the top while everything else keeps snapshot order; because it
+moves delegates instead of rebuilding the model, no delegate state is lost.
+
+Because rows can reorder mid-session, the panel's keyboard cursor tracks the
+selected agent by `paneId`, never by row index (`Panel.qml` keeps
+`selectedPane`; `hasCursor` compares against each row's `paneId`). The
+`Repeater` in `Panel.qml` binds roles (`name`, `status`, `title`, `folder`,
 `workspaceLabel`, `focused`) to `required property` delegates.
 
 ## Focus mechanics
 
 `Panel.qml` calls `service.focusAgent(paneId)`, which runs
-`bin/omarchy-herdr-focus <paneId>` detached. Verified on Hyprland 0.56.2:
+`bin/omarchy-herdr-focus <paneId>` through a guarded Quickshell `Process`
+(guarded on `running`, like the poll process, so rapid clicks cannot overlap).
+Verified on Hyprland 0.56.2:
 
 1. `herdr agent focus <paneId>` moves Herdr's cursor to the agent's
    workspace/tab/pane. This is a server API call and works regardless of
    where the Herdr window is (or whether it exists at all).
 2. The helper scans `hyprctl -j clients`, and for each window walks
    `/proc/<pid>/task/<pid>/children` recursively for a process named `herdr`.
-   The matching window's `address` is used to dispatch
+   All matches are scored: a mapped, unhidden window on a normal workspace is
+   preferred over one inside a special workspace, then hidden, then unmapped;
+   ties keep compositor order.
+3. If the chosen window lives in a special workspace (`special:*`) that no
+   monitor currently displays (checked via `hyprctl -j monitors`
+   `specialWorkspace.name`), the helper dispatches
+   `hl.dsp.workspace.toggle_special("<name>")` first — plain focus does not
+   open hidden special workspaces, so scratchpad/minimize setups would
+   otherwise look like dead clicks. Without monitor data the state is left
+   untouched.
+4. When no process tree matches but a window class was given
+   (`windowClass` setting, passed as the helper's second argument), the
+   best-ranked client whose `class`/`initialClass` matches case-insensitively
+   is used instead. This covers Herdr running on a remote host inside a local
+   terminal (over SSH), where no local `herdr` process exists.
+5. The chosen window's `address` is used to dispatch
    `hl.dsp.focus({ window = "address:0x…" })`.
-3. Hyprland 0.56 switches the active workspace to the focused window, so the
+6. Hyprland 0.56 switches the active workspace to the focused window, so the
    Herdr window is raised from any workspace.
 
-The Herdr window must be found by process tree, not by window title: herdr's
-`window_title = "{hostname}: {workspace}"` changes whenever the active
-workspace changes. If Hyprland is unavailable or no local window runs herdr
-(headless server, `--remote` attach), steps 2–3 are skipped and the in-TUI
-focus still applies.
+The Herdr window must be found by process tree first, not by window title:
+herdr's `window_title = "{hostname}: {workspace}"` changes whenever the active
+workspace changes; the class fallback only applies when the tree lookup finds
+nothing. If Hyprland is unavailable or no local window matches (headless
+server, `--remote` attach without a matching class), steps 2–5 are skipped
+and the in-TUI focus still applies.
+
+A failed jump must never be silent: `Service.qml` collects the helper's
+stderr and, on a non-zero exit, emits a critical "Herdr · could not jump"
+toast through the same notification path as the state toasts. Partial
+success (window raised despite a herdr-side focus failure) still exits 0 and
+only warns on stderr.
+
+When herdr is unreachable, the bar icon dims (`Color.muted` instead of the
+state tint) and the panel offers a "Launch Herdr" button that runs
+`$OMARCHY_PATH/bin/omarchy-launch-terminal-herdr`.
 
 ## Known limitations
 
 - One Herdr window: if several terminal windows each run a `herdr` process,
-  the helper raises the first match found.
+  the helper raises the best-scoring match (visible normal-workspace window
+  first); it cannot tell which terminal hosts the clicked agent.
 - `done`/`idle` semantics come from herdr (focusing a tab marks it seen); the
   plugin only observes them.
 - The panel shows agent kind as the name; herdr's live agent name (`agent

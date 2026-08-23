@@ -25,42 +25,110 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  readonly property color barColor: service.blockedCount > 0
-    ? Color.urgent
-    : (service.workingCount > 0 ? Color.accent : root.foreground)
+  readonly property color barColor: !service.connected
+    ? Color.muted
+    : (service.blockedCount > 0
+      ? Color.urgent
+      : (service.workingCount > 0 ? Color.accent : root.foreground))
 
   readonly property bool showStatusLine: !!service
     && service.connected && service.agentCount > 0
 
-  property int selectedIndex: 0
+  // Keyboard cursor tracks the agent (paneId), not the row index: the list
+  // re-sorts as agents enter/leave blocked, so an index would drift.
+  property string selectedPane: ""
   property bool cursorActive: false
+
+  property bool filterActive: false
+  property string filterText: ""
+  property int _tick: 0
+
+  // Periodic tick to update elapsed-time labels in agent rows.
+  Timer {
+    interval: 10000
+    repeat: true
+    running: root.opened
+    onTriggered: root._tick++
+  }
+
+  function barSummary() {
+    if (!service.connected) return "Herdr not running"
+    if (service.agentCount === 0) return "No agents"
+    var parts = [service.agentCount + " agent" + (service.agentCount === 1 ? "" : "s")]
+    if (service.workingCount > 0) parts.push(service.workingCount + " working")
+    if (service.blockedCount > 0) parts.push(service.blockedCount + " blocked")
+    return parts.join(" · ")
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  function indexOfPane(paneId) {
+    for (var i = 0; i < service.agents.count; i++)
+      if (service.agents.get(i).paneId === paneId) return i
+    return -1
+  }
+
   function moveCursor(dy) {
     var count = service.agents.count
     if (count === 0) return
-    if (!cursorActive) {
+    var index = root.indexOfPane(root.selectedPane)
+    if (!cursorActive || index < 0) {
       cursorActive = true
-      selectedIndex = 0
+      selectedPane = service.agents.get(0).paneId
     } else {
-      selectedIndex = ((selectedIndex + dy) % count + count) % count
+      index = ((index + dy) % count + count) % count
+      selectedPane = service.agents.get(index).paneId
     }
     ensureVisible()
   }
 
-  function focusSelected() {
-    if (!cursorActive) return
-    var item = service.agents.get(selectedIndex)
-    if (!item || !item.paneId) return
+  function selectPane(paneId) {
+    cursorActive = true
+    selectedPane = paneId
+  }
+
+  function jumpToIndex(index) {
+    var item = service.agents.get(index)
+    if (!item || !item.paneId) return false
+    selectPane(item.paneId)
     service.focusAgent(item.paneId)
+    root.close()
+    return true
+  }
+
+  function firstBlockedIndex() {
+    for (var i = 0; i < service.agents.count; i++)
+      if (service.agents.get(i).status === "blocked") return i
+    return -1
+  }
+
+  // Jump to the first blocked agent, else the first row. The natural target
+  // for a global keybind: leap straight to whatever needs attention.
+  function jumpToBlocked() {
+    if (service.agents.count === 0) return false
+    var index = root.firstBlockedIndex()
+    return jumpToIndex(index >= 0 ? index : 0)
+  }
+
+  function jumpToAgent(name) {
+    var wanted = String(name || "").trim().toLowerCase()
+    if (wanted === "") return false
+    for (var i = 0; i < service.agents.count; i++)
+      if (service.agents.get(i).name.toLowerCase() === wanted)
+        return jumpToIndex(i)
+    return false
+  }
+
+  function focusSelected() {
+    if (!cursorActive || selectedPane === "") return
+    service.focusAgent(selectedPane)
     root.close()
   }
 
   function ensureVisible() {
     if (!agentList || !panelFlick) return
-    var item = agentList.itemAt(selectedIndex)
+    var item = agentList.itemAt(root.indexOfPane(root.selectedPane))
     if (!item) return
     if (item.y < panelFlick.contentY) panelFlick.contentY = item.y
     else if (item.y + item.height > panelFlick.contentY + panelFlick.height)
@@ -78,7 +146,9 @@ Panel {
 
   onOpenedChanged: if (opened) {
     cursorActive = false
-    selectedIndex = 0
+    selectedPane = ""
+    filterActive = false
+    filterText = ""
     service.panelOpen = true
     if (panelFlick) panelFlick.contentY = 0
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -102,12 +172,11 @@ Panel {
     function toggle(): void { root.toggle() }
     function refresh(): string { service.refresh(); return "ok" }
     function next(): string { root.moveCursor(1); return "ok" }
-    function focus(): string {
-      if (!service.agents.count) return "none"
-      root.cursorActive = true
-      root.selectedIndex = 0
-      root.focusSelected()
-      return "ok"
+    // Jump to the first blocked agent (else the first row) and raise Herdr.
+    function focus(): string { return root.jumpToBlocked() ? "ok" : "none" }
+    // Jump to a running agent by name, e.g. focusAgent("opencode").
+    function focusAgent(name: string): string {
+      return root.jumpToAgent(name) ? "ok" : "none"
     }
   }
 
@@ -155,6 +224,12 @@ Panel {
       if (buttonCode === Qt.MiddleButton) service.refresh()
       else root.toggle()
     }
+
+    PanelToolTip {
+      visible: !root.opened && button.containsMouse
+      text: root.barSummary()
+      fontFamily: root.fontFamily
+    }
   }
 
   KeyboardPanel {
@@ -175,10 +250,34 @@ Panel {
         if (dy !== 0) root.moveCursor(dy)
       }
       onActivateRequested: root.focusSelected()
-      onReturnRequested: root.focusSelected()
-      onCloseRequested: root.close()
+      onReturnRequested: {
+        if (root.filterActive) {
+          root.filterActive = false
+          root.filterText = ""
+          filterField.visible = false
+        } else {
+          root.focusSelected()
+        }
+      }
+      onCloseRequested: {
+        if (root.filterActive) {
+          root.filterActive = false
+          root.filterText = ""
+          filterField.visible = false
+        } else {
+          root.close()
+        }
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
-      onTextKey: function(t) { if (t === "r" || t === "R") service.refresh() }
+      onTextKey: function(t) {
+        if (root.filterActive) return
+        if (t === "/" || t === "f") {
+          root.filterActive = true
+          filterField.visible = true
+        } else if (t === "r" || t === "R") {
+          service.refresh()
+        }
+      }
 
       Flickable {
         id: panelFlick
@@ -237,6 +336,32 @@ Panel {
             foreground: root.foreground
           }
 
+          TextField {
+            id: filterField
+            visible: root.filterActive
+            width: parent.width
+            placeholderText: "Type to filter…"
+            color: root.foreground
+            placeholderTextColor: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            background: Rectangle {
+              radius: height / 2
+              color: "transparent"
+              border.color: root.dim
+              border.width: 1
+            }
+            leftPadding: Style.space(10)
+            rightPadding: Style.space(10)
+            topPadding: Style.space(4)
+            bottomPadding: Style.space(4)
+            onTextChanged: root.filterText = text
+            onVisibleChanged: if (visible) {
+              forceActiveFocus()
+              text = root.filterText
+            }
+          }
+
           Repeater {
             id: agentList
             model: service.agents
@@ -248,9 +373,15 @@ Panel {
               required property string title
               required property string cwd
               required property string folder
+              required property string paneId
               required property string workspaceLabel
               required property bool focused
+              required property double enteredAt
 
+              visible: root.filterText === ""
+                || name.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
+                || folder.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
+                || workspaceLabel.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
               width: parent.width
               agentName: name
               agentStatus: status
@@ -259,16 +390,13 @@ Panel {
               agentFolder: folder
               agentWorkspace: workspaceLabel
               isFocused: focused
-              hasCursor: root.cursorActive && root.selectedIndex === index
+              agentEnteredAt: enteredAt
+              hasCursor: root.cursorActive && root.selectedPane === paneId
               current: focused
 
-              onHovered: {
-                root.cursorActive = true
-                root.selectedIndex = index
-              }
+              onHovered: root.selectPane(paneId)
               onClicked: {
-                root.cursorActive = true
-                root.selectedIndex = index
+                root.selectPane(paneId)
                 root.focusSelected()
               }
             }
@@ -290,7 +418,7 @@ Panel {
             visible: !service.connected
             width: parent.width
             topPadding: Style.space(18)
-            text: "Herdr is not running.\nLaunch it or check its server status, then open this panel again."
+            text: "Herdr is not running.\nLaunch it or check its server status."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -298,11 +426,58 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
+          Rectangle {
+            id: launchButton
+            visible: !service.connected
+            anchors.horizontalCenter: parent.horizontalCenter
+            readonly property bool hovered: launchArea.containsMouse
+            width: launchRow.implicitWidth + Style.space(24)
+            height: Style.space(30)
+            radius: height / 2
+            color: hovered ? Color.accent : "transparent"
+            border.color: Color.accent
+            border.width: 1
+
+            Row {
+              id: launchRow
+              anchors.centerIn: parent
+              spacing: Style.space(6)
+
+              Text {
+                text: ""
+                color: launchButton.hovered ? Color.background : Color.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              Text {
+                text: "Launch Herdr"
+                color: launchButton.hovered ? Color.background : Color.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+            }
+
+            MouseArea {
+              id: launchArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                Quickshell.execDetached([
+                  service.omarchyPath + "/bin/omarchy-launch-terminal-herdr"
+                ])
+                root.close()
+              }
+            }
+          }
+
           Text {
             visible: service.connected && service.agentCount > 0
             width: parent.width
             topPadding: Style.space(2)
-            text: "Click an agent to leap to it · r refreshes"
+            text: "/ filter · ↑↓ navigate · Enter to jump · r refreshes"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -326,6 +501,7 @@ Panel {
     property string agentWorkspace: ""
     property bool isFocused: false
     property bool mouseHover: false
+    property double agentEnteredAt: 0
     signal hovered()
     signal clicked()
 
@@ -334,6 +510,8 @@ Panel {
 
     readonly property color statusColor: root.statusColorFor(agentStatus)
     readonly property string statusLabel: root.statusLabelFor(agentStatus)
+    readonly property string elapsedText: root._tick >= 0
+      ? root.formatElapsed(agentEnteredAt) : ""
 
     MouseArea {
       anchors.fill: parent
@@ -397,6 +575,14 @@ Panel {
             font.pixelSize: Style.font.caption
             font.bold: true
           }
+
+          Text {
+            visible: row.elapsedText !== ""
+            text: row.elapsedText
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
 
         Text {
@@ -435,7 +621,7 @@ Panel {
     }
 
     PanelToolTip {
-      visible: row.mouseHover
+      visible: row.mouseHover && text !== ""
       text: {
         var parts = []
         if (row.agentTitle !== "") parts.push(row.agentTitle)
@@ -482,5 +668,16 @@ Panel {
       case "idle": return "IDLE"
       default: return "UNKNOWN"
     }
+  }
+
+  function formatElapsed(enteredAt) {
+    if (!enteredAt || enteredAt <= 0) return ""
+    var sec = Math.floor((Date.now() - enteredAt) / 1000)
+    if (sec < 5) return ""
+    if (sec < 60) return sec + "s"
+    var min = Math.floor(sec / 60)
+    if (min < 60) return min + "m " + (sec % 60) + "s"
+    var hr = Math.floor(min / 60)
+    return hr + "h " + (min % 60) + "m"
   }
 }

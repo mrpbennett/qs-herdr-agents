@@ -32,6 +32,10 @@ Desktop toasts when agents change state (both toggleable in plugin settings):
 
 - **Needs attention** — an agent entered `blocked` and is waiting for input.
 - **Finished** — a working agent transitioned to `done` (background work done).
+- **Agent gone** — a blocked agent's pane disappeared between polls.
+
+Clicking a **needs attention** or **finished** toast jumps straight to that
+agent, from wherever you are on the desktop.
 
 ### Click to jump
 
@@ -41,7 +45,32 @@ Click (or keyboard-Enter) an agent row and the plugin:
 2. locates the Herdr terminal window and raises it with a Hyprland dispatch.
 
 The active Hyprland workspace follows the Herdr window, so the jump works from
-anywhere on the desktop.
+anywhere on the desktop — including when Herdr lives in a special workspace
+(scratchpad or minimize-style setups): it is opened automatically before the
+jump. If several terminals run herdr, a visible one is preferred. A failed
+jump shows a desktop toast instead of silently doing nothing.
+
+If Herdr runs on a remote host inside a local terminal (over SSH), the
+process-tree lookup finds nothing locally; set the `windowClass` setting to
+your terminal's window class (e.g. `ghostty`) so the window can still be
+found and raised.
+
+Blocked agents are pinned to the top of the panel list, and if herdr itself
+is not running the panel offers a **Launch Herdr** button.
+
+### Jump without opening the panel
+
+The widget exposes IPC actions you can bind to global Hyprland keybinds:
+
+```sh
+# Jump to the first blocked agent (falls back to the first agent):
+omarchy-shell ipc call mrpbennett.herdr-agents focus
+
+# Jump to a specific agent by name:
+omarchy-shell ipc call mrpbennett.herdr-agents focusAgent opencode
+
+# Also available: toggle, open, close, next, refresh
+```
 
 ## Settings
 
@@ -50,6 +79,7 @@ anywhere on the desktop.
 | `refreshIntervalSec` | `2` | How often the Herdr session snapshot is polled. |
 | `notifyOnBlocked` | `on` | Toast when an agent needs attention. |
 | `notifyOnFinished` | `on` | Toast when an agent finishes background work. |
+| `windowClass` | *(empty)* | Fallback terminal window class when Herdr runs remotely. |
 
 ## Requirements
 

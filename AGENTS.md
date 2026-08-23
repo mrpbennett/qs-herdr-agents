@@ -36,23 +36,50 @@ per-pane state:
 
 - into `blocked` → toast "needs attention" (critical) when `notifyOnBlocked`
 - `working` → `done` → toast "finished" (normal) when `notifyOnFinished`
+- a previously blocked pane vanishing between polls → toast "agent gone"
+  (normal) when `notifyOnBlocked`
 
-Toasts go through `$OMARCHY_PATH/bin/omarchy-notification-send` via
+The state toasts carry an Omarchy `--exec` action
+(`'<focus-helper>' '<paneId>'`), so clicking the toast itself jumps to the
+agent. Toasts go through `$OMARCHY_PATH/bin/omarchy-notification-send` via
 `Quickshell.execDetached`, matching how the reminders plugin notifies.
 
 The ListModel is updated in place (roles mutated, items appended/removed) so
-the panel keeps its scroll position and keyboard cursor across polls.
+the panel keeps its scroll position across polls; `resortModel()` then does a
+stable partition (`ListModel.move`) pinning blocked rows to the top. The
+panel's keyboard cursor tracks the selected agent by `paneId`, never by row
+index, so reordering cannot strand it.
 
-A click calls `Quickshell.execDetached([focusHelper, paneId])`. The helper:
+A click calls the focus helper through a guarded Quickshell `Process`
+(`Service.qml`), passing `<paneId>` and the optional `windowClass` setting;
+the helper:
 
 1. runs `herdr agent focus <paneId>` (focuses inside the Herdr TUI),
 2. finds the Herdr window among `hyprctl -j clients` by walking each client
-   pid's `/proc` tree for a process named `herdr`,
-3. dispatches `hl.dsp.focus({ window = "address:<addr>" })`, which switches
+   pid's `/proc` tree for a process named `herdr`, scoring all matches so a
+   mapped, unhidden window on a normal workspace wins,
+3. opens the hosting special workspace with `hl.dsp.workspace.toggle_special`
+   when that workspace is not already shown on any monitor,
+4. falls back to the best-ranked client matching the given window class
+   (`class`/`initialClass`, case-insensitive) when no process tree matched —
+   for Herdr over SSH in a local terminal,
+5. dispatches `hl.dsp.focus({ window = "address:<addr>" })`, which switches
    the active Hyprland workspace and raises the window.
 
+A non-zero helper exit surfaces as a critical "could not jump" toast using
+the collected stderr; partial success (window raised despite herdr-side
+failure) still exits 0.
+
 If Hyprland is unavailable or no local Herdr window exists (headless/remote),
-step 2/3 is skipped; the in-TUI focus still applies.
+steps 2–5 are skipped; the in-TUI focus still applies.
+
+When herdr is unreachable, counts reset to zero, the bar icon dims to
+`Color.muted`, and the panel shows a "Launch Herdr" button that runs
+`$OMARCHY_PATH/bin/omarchy-launch-terminal-herdr`.
+
+Global keybinds jump without opening the panel: IPC `focus` targets the first
+blocked agent (else the first row) and `focusAgent <name>` a named agent;
+both run the same focus helper path.
 
 ## Correctness Invariants
 
@@ -60,12 +87,16 @@ step 2/3 is skipped; the in-TUI focus still applies.
   for state "changes" that merely reflect plugin startup.
 - Notify only on real transitions (`blocked` entry, `working`→`done`); never
   spam on re-polls of a stable state.
-- The polling Process must never be started twice (guard on `running`).
+- Neither the polling Process nor the click-to-jump Process may ever be
+  started twice (guard on `running`).
 - Keep the in-place model sync: never `clear()`+`append()` the ListModel,
   which would reset panel scroll/cursor.
+- The panel keyboard cursor is keyed by `paneId`, never row index; reordering
+  (blocked pinned to top) must not strand or retarget the cursor.
 - The focus helper identifies the Herdr window by process tree, never by
   window title: Herdr sets the title to `{hostname}: {workspace}`, which
-  changes as the active workspace changes.
+  changes as the active workspace changes. The class fallback only applies
+  when no process tree matched.
 - The Hyprland dispatch is the 0.56 Lua form
   `hl.dsp.focus({ window = "address:0x…" })`; legacy `focuswindow class:…`
   is broken on 0.56.
@@ -99,3 +130,17 @@ mock the subprocess boundaries instead.
 - Update `README.md` when user-visible behavior or settings change.
 - Update `docs/design.md` when the data source, poll cadence, notification
   rules, or focus mechanics change.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked on GitHub (`mrpbennett/qs-herdr-agents`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles use their default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: one `CONTEXT.md` plus `docs/adr/` at the repo root. See `docs/agents/domain.md`.

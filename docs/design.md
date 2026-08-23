@@ -2,6 +2,58 @@
 
 Verified API details and architecture for the Herdr Agents plugin.
 
+## Modules
+
+The codebase is split into focused modules with narrow interfaces:
+
+- **Snapshot Adapter** (`snapshot.js`): stateless pure functions that parse
+  `herdr api snapshot` output, build per-pane agent records, and diff
+  consecutive snapshots. Imported by `Service.qml` as `Snap`. Tested via
+  Node.js subprocess evaluation.
+- **Hyprland Window Adapter** (`hyprland.py`): class-based module
+  (`HyprlandWindow`) that owns all Hyprland interaction — client discovery,
+  process tree inspection, client ranking, special workspace management, and
+  window raising. Constructed with an injected `herdr_checker` callable for
+  testability.
+- **Focus Helper** (`bin/omarchy-herdr-focus`): thin orchestrator that focuses
+  the agent inside Herdr TUI, then delegates to `HyprlandWindow` for window
+  discovery and raising.
+- **Service** (`Service.qml`): polls, delegates parsing to the Snapshot
+  Adapter, keeps the ListModel in sync, detects transitions, emits toasts.
+- **Panel** (`Panel.qml`): bar icon and agent list UI.
+
+## Snapshot Adapter interface
+
+`snapshot.js` exports five functions:
+
+| Function | Signature | Purpose |
+| --- | --- | --- |
+| `parse` | `(raw: string) → { snapshot, error }` | Parse raw JSON; error is a string on failure. |
+| `basename` | `(path: string) → string` | Derive basename from a path. |
+| `isActive` | `(status: string) → boolean` | True for working/blocked/done. |
+| `buildRecords` | `(snapshot, stateByPane) → { byPane, counts }` | Build per-pane agent records. Mutates `stateByPane` for enteredAt tracking. |
+| `diffRecords` | `(prevByPane, currByPane) → { added, removed, transitions }` | Diff two pane maps. |
+
+`Service.qml` calls `Snap.parse`, `Snap.buildRecords`, and `Snap.diffRecords`
+in `applySnapshot`. The `stateByPane` parameter is Service's `_enteredAt` map,
+which the adapter mutates to track when agents entered their current status.
+
+## Hyprland Window Adapter interface
+
+`HyprlandWindow.__init__(herdr_checker, hyprctl_bin)` — `herdr_checker` is a
+callable `(pid: int) -> bool` that walks `/proc` to detect a `herdr` process.
+
+| Method | Signature | Purpose |
+| --- | --- | --- |
+| `findClient` | `(clients) → Client \| None` | Best client whose process tree runs herdr. |
+| `findByClass` | `(clients, window_class) → Client \| None` | Best-ranked client matching window class. |
+| `ensureVisible` | `(client) → bool` | Open special workspace if hidden. |
+| `raiseWindow` | `(address) → (ok, detail)` | Focus window by address (Hyprland 0.56+). |
+| `hyprctlClients` | `() → list \| None` | Query compositor for all clients. |
+
+Client ranking (lower is better): 0 = mapped, visible, normal workspace; 1 =
+special workspace; 2 = hidden; 3 = unmapped.
+
 ## Data source: `herdr api snapshot`
 
 `Service.qml` polls one command, `herdr api snapshot`, and parses its
@@ -79,7 +131,9 @@ selected agent by `paneId`, never by row index (`Panel.qml` keeps
 `Panel.qml` calls `service.focusAgent(paneId)`, which runs
 `bin/omarchy-herdr-focus <paneId>` through a guarded Quickshell `Process`
 (guarded on `running`, like the poll process, so rapid clicks cannot overlap).
-Verified on Hyprland 0.56.2:
+The orchestrator focuses inside Herdr TUI, then delegates to the Hyprland
+Window Adapter (`hyprland.py`) for all compositor interaction. Verified on
+Hyprland 0.56.2:
 
 1. `herdr agent focus <paneId>` moves Herdr's cursor to the agent's
    workspace/tab/pane. This is a server API call and works regardless of

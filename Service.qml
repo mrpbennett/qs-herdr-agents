@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "snapshot.js" as Snap
 
 // Data layer for the Herdr Agents panel. Polls the Herdr session snapshot,
 // keeps a live ListModel of the running agents, and emits desktop toasts when
@@ -94,80 +95,27 @@ Item {
   }
 
   // ------------------------------------------------------------ parsing
-  function basename(path) {
-    var text = String(path || "")
-    var slash = text.lastIndexOf("/")
-    return slash >= 0 ? text.slice(slash + 1) : text
-  }
-
-  function isActive(status) {
-    return status === "working" || status === "blocked" || status === "done"
-  }
-
   function applySnapshot(text) {
-    var parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch (e) {
-      root.error = "herdr returned invalid JSON"
-      return
-    }
-    var snapshot = (parsed && typeof parsed === "object" && parsed.result)
-      ? parsed.result.snapshot : null
-    if (!snapshot) {
-      root.error = "herdr snapshot unavailable"
+    var result = Snap.parse(text)
+    if (result.error) {
+      root.error = result.error
       return
     }
 
-    var labelById = {}
-    var workspaces = snapshot.workspaces || []
-    for (var i = 0; i < workspaces.length; i++)
-      labelById[workspaces[i].workspace_id] = String(workspaces[i].label || "")
-
-    var byPane = {}
-    var agentsIn = snapshot.agents || []
-    var totalActive = 0
-    var totalWorking = 0
-    var totalBlocked = 0
-    var now = Date.now()
-    for (var a = 0; a < agentsIn.length; a++) {
-      var agent = agentsIn[a]
-      var status = String(agent.agent_status || "unknown")
-      var paneId = String(agent.pane_id || "")
-      // Preserve the original entered-at timestamp when the status has not
-      // changed; start a new one when it has.
-      var prevStatus = root._prevByPane[paneId]
-        ? root._prevByPane[paneId].status : ""
-      if (!root._enteredAt[paneId] || prevStatus !== status)
-        root._enteredAt[paneId] = now
-      var record = {
-        name: String(agent.agent || "agent"),
-        status: status,
-        title: String(agent.terminal_title_stripped || ""),
-        cwd: String(agent.cwd || ""),
-        folder: root.basename(agent.cwd),
-        paneId: paneId,
-        workspaceId: String(agent.workspace_id || ""),
-        workspaceLabel: labelById[agent.workspace_id] || String(agent.workspace_id || ""),
-        focused: !!agent.focused,
-        enteredAt: root._enteredAt[paneId]
-      }
-      byPane[paneId] = record
-      if (root.isActive(status)) totalActive++
-      if (status === "working") totalWorking++
-      if (status === "blocked") totalBlocked++
-    }
+    var built = Snap.buildRecords(result.snapshot, root._enteredAt)
+    var byPane = built.byPane
+    var counts = built.counts
 
     if (root._baseline) {
-      var pane
+      var diff = Snap.diffRecords(root._prevByPane, byPane)
       // Agents that vanished since the last poll: a blocked agent that is
       // gone was either handled or died — worth surfacing either way.
-      for (pane in root._prevByPane)
-        if (!byPane[pane]) root.detectExit(root._prevByPane[pane])
-      for (pane in byPane) {
-        var previous = root._prevByPane[pane]
-        if (previous) root.detectTransition(previous, byPane[pane])
-      }
+      for (var i = 0; i < diff.removed.length; i++)
+        root.detectExit(root._prevByPane[diff.removed[i]])
+      for (var j = 0; j < diff.transitions.length; j++)
+        root.detectTransition(
+          root._prevByPane[diff.transitions[j].paneId],
+          diff.transitions[j].record)
       root._prevByPane = byPane
     } else {
       // First successful poll is the baseline; it must not announce agents
@@ -179,9 +127,9 @@ Item {
     root.syncModel(byPane)
     root.resortModel()
     root.agentCount = Object.keys(byPane).length
-    root.activeCount = totalActive
-    root.workingCount = totalWorking
-    root.blockedCount = totalBlocked
+    root.activeCount = counts.active
+    root.workingCount = counts.working
+    root.blockedCount = counts.blocked
     root._consecutiveFailures = 0
 
     // Emit a reconnect toast when herdr comes back online after being down.

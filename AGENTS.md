@@ -14,18 +14,28 @@ verified API details.
 ## Architecture
 
 - `manifest.json`: Omarchy plugin metadata and bar-widget entry point.
-- `Service.qml`: the data layer. Polls `herdr api snapshot` on a timer, keeps
-  a live `ListModel` of agents, detects state transitions, and emits Omarchy
-  desktop toasts.
+- `snapshot.js`: Snapshot Adapter — stateless pure functions for parsing
+  `herdr api snapshot` output, building agent records, and diffing per-pane
+  state between polls. Imported by `Service.qml`; tested via Node.js.
+- `Service.qml`: the data layer. Polls `herdr api snapshot` on a timer,
+  delegates parsing to the Snapshot Adapter, keeps a live `ListModel` of
+  agents, detects state transitions, and emits Omarchy desktop toasts.
+- `hyprland.py`: Hyprland Window Adapter — class-based module that owns all
+  Hyprland interaction: client discovery (`hyprctl -j clients`), process tree
+  inspection, client ranking, special workspace management, and window raising.
+  Constructed with an injected `herdr_checker` for testability.
 - `Panel.qml`: the bar icon (tint + busy-count badge) and the
   `KeyboardPanel` agent list. Clicking or Entering a row calls
   `service.focusAgent(paneId)`.
-- `bin/omarchy-herdr-focus`: Python (stdlib) helper that runs
-  `herdr agent focus <target>` and then raises the Herdr terminal window with
-  a Hyprland dispatch.
+- `bin/omarchy-herdr-focus`: Python (stdlib) orchestrator that focuses the
+  agent inside the Herdr TUI, then delegates to the Hyprland Window Adapter
+  for window discovery and raising.
 - `install.sh` / `uninstall.sh`: idempotent user-level install/removal via
   plugin symlink + shell plugin commands.
-- `tests/test_herdr_focus.py`: stdlib `unittest` coverage for the helper.
+- `tests/test_snapshot.py`: Node.js-backed unit tests for the Snapshot Adapter.
+- `tests/test_hyprland.py`: unit tests for the Hyprland Window Adapter.
+- `tests/test_herdr_focus.py`: orchestrator-only unit tests for the focus
+  helper's flow control.
 
 ## Runtime Flow
 
@@ -127,6 +137,10 @@ mock the subprocess boundaries instead.
 
 - Add focused regressions in `tests/test_herdr_focus.py` for window finding
   and exit-code semantics.
+- Add snapshot adapter tests in `tests/test_snapshot.py` when changing the
+  Herdr snapshot format or record-building logic.
+- Add Hyprland adapter tests in `tests/test_hyprland.py` when changing window
+  ranking, class matching, or special workspace handling.
 - Update `README.md` when user-visible behavior or settings change.
 - Update `docs/design.md` when the data source, poll cadence, notification
   rules, or focus mechanics change.

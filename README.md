@@ -10,32 +10,47 @@ what it is doing right now, and the Herdr workspace it is working in. Click an
 agent and you land on it inside Herdr — no matter which desktop or window you
 are looking at.
 
-## What it does
+## Features
 
-The plugin adds two things to your Omarchy bar:
+### Bar icon
 
-1. **Bar icon** — a static sheep glyph tinted by fleet state:
-   - **accent** while any agent is working,
-   - **urgent** when any agent needs attention,
-   - a **count badge** of busy agents (working / blocked / done).
+A static sheep glyph (`󰳆`) tinted by fleet state:
 
-2. **Panel** — click the icon to open a list, one row per agent:
-   - status dot + label (`WORKING`, `BLOCKED`, `DONE`, `IDLE`, `UNKNOWN`),
-   - agent name,
-   - the agent's **current activity** (its live terminal title),
-   - the **Herdr workspace** it is in, and the project folder,
-   - a `FOCUSED` mark on the agent currently under the Herdr cursor.
+- **accent** while any agent is working,
+- **urgent** when any agent needs attention (blocked),
+- **muted** when herdr is unreachable,
+- a **count badge** of busy agents (working / blocked / done).
+
+### Panel
+
+Click the icon to open a list, one row per agent:
+
+- status dot + label (`WORKING`, `BLOCKED`, `DONE`, `IDLE`, `UNKNOWN`),
+- agent name,
+- the agent's **current activity** (its live terminal title),
+- the **Herdr workspace** it is in, and the project folder,
+- a `FOCUSED` mark on the agent currently under the Herdr cursor,
+- elapsed time in the current status (e.g. "3m 12s").
+
+Blocked agents are pinned to the top. If herdr is not running, the panel
+offers a **Launch Herdr** button.
+
+Type `/` or `f` to filter agents by name, workspace, or folder. Press
+Escape to clear.
 
 ### Notifications
 
-Desktop toasts when agents change state (both toggleable in plugin settings):
+Desktop toasts when agents change state (toggleable in plugin settings):
 
-- **Needs attention** — an agent entered `blocked` and is waiting for input.
-- **Finished** — a working agent transitioned to `done` (background work done).
-- **Agent gone** — a blocked agent's pane disappeared between polls.
+| Toast | When | Urgency |
+| --- | --- | --- |
+| **Needs attention** | agent entered `blocked` | critical |
+| **Finished** | working agent transitioned to `done` | normal |
+| **Agent gone** | blocked agent's pane vanished between polls | normal |
+| **Herdr reconnected** | herdr came back online after being down | normal |
 
 Clicking a **needs attention** or **finished** toast jumps straight to that
-agent, from wherever you are on the desktop.
+agent.
 
 ### Click to jump
 
@@ -55,12 +70,9 @@ process-tree lookup finds nothing locally; set the `windowClass` setting to
 your terminal's window class (e.g. `ghostty`) so the window can still be
 found and raised.
 
-Blocked agents are pinned to the top of the panel list, and if herdr itself
-is not running the panel offers a **Launch Herdr** button.
+### IPC actions
 
-### Jump without opening the panel
-
-The widget exposes IPC actions you can bind to global Hyprland keybinds:
+Bind global Hyprland keybinds to jump without opening the panel:
 
 ```sh
 # Jump to the first blocked agent (falls back to the first agent):
@@ -69,16 +81,16 @@ omarchy-shell ipc call mrpbennett.herdr-agents focus
 # Jump to a specific agent by name:
 omarchy-shell ipc call mrpbennett.herdr-agents focusAgent opencode
 
-# Also available: toggle, open, close, next, refresh
+# Other actions: toggle, open, close, show, hide, next, refresh
 ```
 
 ## Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `refreshIntervalSec` | `2` | How often the Herdr session snapshot is polled. |
-| `notifyOnBlocked` | `on` | Toast when an agent needs attention. |
-| `notifyOnFinished` | `on` | Toast when an agent finishes background work. |
+| `refreshIntervalSec` | `2` | How often the Herdr session snapshot is polled (1–60s). |
+| `notifyOnBlocked` | `true` | Toast when an agent needs attention. |
+| `notifyOnFinished` | `true` | Toast when an agent finishes background work. |
 | `windowClass` | *(empty)* | Fallback terminal window class when Herdr runs remotely. |
 
 ## Requirements
@@ -91,10 +103,11 @@ omarchy-shell ipc call mrpbennett.herdr-agents focusAgent opencode
 - `herdr` — shelled out to for `herdr api snapshot` (polling) and
   `herdr agent focus <pane>` (click-to-jump). No network calls; both talk to
   the local Herdr server only.
-- `hyprctl` — shelled out to by `bin/omarchy-herdr-focus` to locate and raise
-  the Herdr window via a Hyprland dispatch.
+- `hyprctl` — shelled out to by the Hyprland Window Adapter to locate and
+  raise the Herdr window via a Hyprland dispatch.
 - `python3` — runs `bin/omarchy-herdr-focus`, a stdlib-only script (no pip
   packages required).
+- `node` — runs the Snapshot Adapter tests (`tests/test_snapshot.py`).
 - No non-stdlib QML imports beyond Quickshell and the Omarchy shell's own
   `qs.Commons` / `qs.Ui` modules.
 
@@ -128,9 +141,7 @@ leaving the rest of your `shell.json` untouched.
 
 ### Complete removal
 
-If you want to fully remove every trace of the plugin from your system:
-
-1. **Remove the plugin** (disables it and removes the installed copy):
+1. **Remove the plugin** (disables and removes the installed copy):
 
    ```sh
    omarchy plugin remove mrpbennett.herdr-agents
@@ -139,10 +150,8 @@ If you want to fully remove every trace of the plugin from your system:
 2. **Remove the cloned repository** (the source code on disk):
 
    ```sh
-   rm -rf /home/pb/Projects/qs-herdr-agents
+   rm -rf ~/path/to/qs-herdr-agents
    ```
-
-   Or wherever you cloned it.
 
 3. **Restart the shell** (optional, picks up the change immediately):
 
@@ -150,15 +159,40 @@ If you want to fully remove every trace of the plugin from your system:
    omarchy restart shell
    ```
 
-After these steps the plugin is gone: no entry in `~/.config/omarchy/plugins/`,
-nothing enabled in `shell.json`, and no source files on disk.
+## Architecture
+
+The codebase is split into focused modules with narrow interfaces:
+
+| Module | Purpose |
+| --- | --- |
+| `snapshot.js` | **Snapshot Adapter** — stateless pure functions for parsing `herdr api snapshot` output, building per-pane agent records, and diffing consecutive snapshots. Imported by `Service.qml` as `Snap`. |
+| `hyprland.py` | **Hyprland Window Adapter** — class-based module (`HyprlandWindow`) owning all Hyprland interaction: client discovery, process tree inspection, ranking, special workspace management, and window raising. |
+| `bin/omarchy-herdr-focus` | **Focus Helper** — thin orchestrator that focuses the agent inside Herdr TUI, then delegates to `HyprlandWindow` for window discovery and raising. |
+| `Service.qml` | **Data Layer** — polls `herdr api snapshot`, delegates parsing to the Snapshot Adapter, keeps the ListModel in sync, detects state transitions, emits toasts. |
+| `Panel.qml` | **UI** — bar icon and agent list panel. |
+
+### Data source
+
+One call per poll — `herdr api snapshot` — returns every agent (state,
+current activity title, cwd, pane id) and every workspace (label) from the
+running Herdr server. See `docs/design.md` for the verified API details and
+Hyprland 0.56 focus mechanics.
+
+### Focus mechanics
+
+1. `herdr agent focus <paneId>` moves Herdr's cursor to the agent's
+   workspace/tab/pane.
+2. The helper scans `hyprctl -j clients` and walks each client's `/proc`
+   tree for a process named `herdr`, scoring matches (visible normal
+   workspace preferred over special, hidden, or unmapped).
+3. If the chosen window lives in a hidden special workspace, it is opened
+   first.
+4. Fallback: if no process tree matches, the best-ranked client matching the
+   `windowClass` setting is used (for Herdr over SSH).
+5. `hl.dsp.focus({ window = "address:0x..." })` raises the window and
+   switches the active workspace.
 
 ## Development
-
-- `Service.qml` — snapshot polling, the live agent model, state-change toasts.
-- `Panel.qml` — bar icon and the agent list panel.
-- `bin/omarchy-herdr-focus` — focus agent in Herdr + raise the Herdr window.
-- `install.sh` / `uninstall.sh` — idempotent user-level install/removal.
 
 Run the tests and static checks:
 
@@ -166,14 +200,8 @@ Run the tests and static checks:
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 bash -n install.sh uninstall.sh
 omarchy plugin validate .
+git diff --check
 ```
-
-## Data source
-
-One call per poll — `herdr api snapshot` — returns every agent (state,
-current activity title, cwd, pane id) and every workspace (label) from the
-running Herdr server. See `docs/design.md` for the details and the verified
-Hyprland 0.56 focus mechanics.
 
 ## License
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mrpbennett.herdr-agents",
   "name": "Herdr Agents",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Paul Bennett",
   "license": "MIT",
   "description": "Live Herdr agent status in the Omarchy bar: every agent's state, current activity, workspace, and click-to-focus.",

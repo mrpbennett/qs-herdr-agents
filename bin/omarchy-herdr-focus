@@ -35,7 +35,6 @@ Exit codes: 0 success, 1 herdr or hyprctl failure, 2 usage error.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,16 +43,10 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from hyprland import HyprlandWindow  # noqa: E402
+from hyprland import HyprlandWindow, _run  # noqa: E402
 
 HERDR: str = os.environ.get("HERDR_BIN", "herdr")
 _HERDR_TIMEOUT: int = 5  # seconds — herdr agent focus is a local server call
-
-
-def _run(cmd: list[str], *, timeout: int = 10) -> subprocess.CompletedProcess[str]:
-    """Run a command and return the result without raising on non-zero exit."""
-    return subprocess.run(cmd, capture_output=True, text=True, check=False,
-                          timeout=timeout)
 
 
 def focus_in_herdr(target: str) -> tuple[bool, str]:

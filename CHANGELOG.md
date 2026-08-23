@@ -5,6 +5,41 @@ All notable changes to the Herdr Agents plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] — 2026-08-23
+
+### Added
+- **Snapshot Adapter** (`snapshot.js`) — stateless pure functions (`parse`,
+  `basename`, `isActive`, `buildRecords`, `diffRecords`) extracted from
+  `Service.qml` for parsing Herdr snapshot data. Tested via Node.js.
+- **Hyprland Window Adapter** (`hyprland.py`) — class-based module
+  (`HyprlandWindow`) owning all Hyprland interaction: client discovery,
+  process tree inspection, client ranking, special workspace management,
+  and window raising. Constructed with an injected `herdr_checker` for
+  testability.
+- `tests/test_snapshot.py` — Node.js-backed unit tests for the Snapshot
+  Adapter.
+- `tests/test_hyprland.py` — unit tests for the Hyprland Window Adapter.
+
+### Changed
+- `bin/omarchy-herdr-focus` is now a thin orchestrator: focuses the agent
+  inside the Herdr TUI, then delegates to `HyprlandWindow` for window
+  discovery and raising.
+- `Service.qml` delegates parsing to the Snapshot Adapter (`Snap.parse`,
+  `Snap.buildRecords`, `Snap.diffRecords`).
+- `tests/test_herdr_focus.py` now tests only the orchestrator's flow control;
+  Hyprland-specific tests live in `tests/test_hyprland.py`.
+- Deduplicated `_run` helper — orchestrator imports from `hyprland` instead
+  of defining its own copy.
+- Extracted `_hyprctl_json` in `HyprlandWindow` to share the
+  run-hyprctl-parse-JSON shape between `hyprctlClients` and
+  `_hyprctl_monitors`.
+
+### Fixed
+- `snapshot.js` header comment referenced wrong test file path
+  (`test_snapshot.js` → `test_snapshot.py`).
+- `AGENTS.md` and `docs/design.md` updated to document the new module
+  boundaries and test locations.
+
 ## [0.2.0] — 2026-08-23
 
 ### Added

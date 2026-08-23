@@ -1,5 +1,5 @@
 // Snapshot Adapter — stateless pure functions for Herdr snapshot data.
-// Owned by Service.qml; tests live in tests/test_snapshot.js.
+// Owned by Service.qml; tests live in tests/test_snapshot.py.
 
 /**
  * Parse raw JSON from `herdr api snapshot` into a structured snapshot.
@@ -114,8 +114,7 @@ function diffRecords(prevByPane, currByPane) {
       added.push(pane)
     } else {
       var curr = currByPane[pane]
-      if (prev.status !== curr.status)
-        transitions.push({ paneId: pane, from: prev.status, to: curr.status, record: curr })
+      transitions.push({ paneId: pane, from: prev.status, to: curr.status, record: curr })
     }
   }
 

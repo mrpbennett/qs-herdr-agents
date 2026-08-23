@@ -130,17 +130,21 @@ class HyprlandWindow:
 
     def hyprctlClients(self) -> Optional[list[dict[str, Any]]]:
         """Query the compositor for all clients, or None on failure."""
-        out = _run([self._hyprctl, "-j", "clients"], timeout=_HYPRCTL_TIMEOUT)
+        return self._hyprctl_json("clients")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _hyprctl_json(self, subcommand: str) -> Optional[list[dict[str, Any]]]:
+        """Run ``hyprctl -j <subcommand>`` and return parsed JSON, or None."""
+        out = _run([self._hyprctl, "-j", subcommand], timeout=_HYPRCTL_TIMEOUT)
         if out.returncode != 0:
             return None
         try:
             return json.loads(out.stdout)
         except json.JSONDecodeError:
             return None
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _rank(client: dict[str, Any]) -> int:
@@ -164,10 +168,4 @@ class HyprlandWindow:
 
     def _hyprctl_monitors(self) -> Optional[list[dict[str, Any]]]:
         """Query the compositor for all monitors, or None on failure."""
-        out = _run([self._hyprctl, "-j", "monitors"], timeout=_HYPRCTL_TIMEOUT)
-        if out.returncode != 0:
-            return None
-        try:
-            return json.loads(out.stdout)
-        except json.JSONDecodeError:
-            return None
+        return self._hyprctl_json("monitors")

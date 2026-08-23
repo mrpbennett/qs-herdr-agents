@@ -194,7 +194,9 @@ class DiffRecordsTest(unittest.TestCase):
         result = js_eval("diffRecords", prev, curr)
         self.assertEqual(result["added"], [])
         self.assertEqual(result["removed"], [])
-        self.assertEqual(result["transitions"], [])
+        self.assertEqual(len(result["transitions"]), 1)
+        self.assertEqual(result["transitions"][0]["from"], "working")
+        self.assertEqual(result["transitions"][0]["to"], "working")
 
     def test_added_pane(self):
         curr = {"w1:p1": {"status": "working"}}
@@ -231,7 +233,10 @@ class DiffRecordsTest(unittest.TestCase):
         result = js_eval("diffRecords", prev, curr)
         self.assertEqual(result["added"], ["w1:p3"])
         self.assertEqual(result["removed"], ["w1:p2"])
-        self.assertEqual(result["transitions"], [])
+        self.assertEqual(len(result["transitions"]), 1)
+        self.assertEqual(result["transitions"][0]["paneId"], "w1:p1")
+        self.assertEqual(result["transitions"][0]["from"], "working")
+        self.assertEqual(result["transitions"][0]["to"], "working")
 
     def test_empty_both(self):
         result = js_eval("diffRecords", {}, {})

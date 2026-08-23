@@ -1,11 +1,16 @@
 """Unit tests for bin/omarchy-herdr-focus — orchestrator only.
 
-Hyprland-specific functions (find_herdr_client, client_rank, etc.) have been
-migrated to tests/test_hyprland.py. This file tests main()'s flow control.
+Hyprland-specific functions (find_herdr_client, client_rank, etc.) live in
+tests/test_hyprland.py. This file tests main()'s flow control and
+process_has_herdr (process tree inspection, which belongs to the orchestrator).
 """
 
 import io
+import os
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -143,6 +148,28 @@ class MainTest(unittest.TestCase):
     def test_usage_error_with_too_many_args(self):
         with mock.patch.object(sys, "stderr", new=io.StringIO()):
             self.assertEqual(MOD.main(["a", "b", "c"]), 2)
+
+
+class ProcessHasHerdrTest(unittest.TestCase):
+    def test_false_for_missing_pid(self):
+        self.assertFalse(MOD.process_has_herdr(2**31 - 1))
+
+    def test_detects_nested_herdr_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "herdr"
+            script.write_text("#!/bin/sh\nsleep 30\n")
+            script.chmod(0o755)
+            parent = subprocess.Popen(["sh", "-c", f'"{script}"'],
+                                      start_new_session=True)
+            try:
+                for _ in range(100):
+                    if MOD.process_has_herdr(parent.pid):
+                        return
+                    time.sleep(0.02)
+                self.fail("never detected a herdr descendant")
+            finally:
+                os.killpg(os.getpgid(parent.pid), 9)
+                parent.wait()
 
 
 if __name__ == "__main__":

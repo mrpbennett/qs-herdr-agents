@@ -1,14 +1,10 @@
 """Unit tests for hyprland.py — the Hyprland Window Adapter."""
 
 import sys
-import tempfile
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-import os
-import subprocess
 
 sys.dont_write_bytecode = True
 
@@ -236,45 +232,6 @@ class EnsureVisibleTest(unittest.TestCase):
             self.assertTrue(hl.ensureVisible(self.CLIENT_SPECIAL))
             (cmd,), _ = run.call_args
             self.assertIn('toggle_special("scratch")', cmd[2])
-
-
-# ---------------------------------------------------------------------------
-# process_has_herdr (integration, touches real /proc)
-# ---------------------------------------------------------------------------
-
-class ProcessHasHerdrTest(unittest.TestCase):
-    def _load_focus_helper(self):
-        import importlib.machinery
-        import importlib.util
-        loader = importlib.machinery.SourceFileLoader(
-            "omarchy_herdr_focus", str(REPO / "bin" / "omarchy-herdr-focus"))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
-
-    def test_false_for_missing_pid(self):
-        mod = self._load_focus_helper()
-        self.assertFalse(mod.process_has_herdr(2**31 - 1))
-
-    def test_detects_nested_herdr_process(self):
-        mod = self._load_focus_helper()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            script = Path(tmp) / "herdr"
-            script.write_text("#!/bin/sh\nsleep 30\n")
-            script.chmod(0o755)
-            parent = subprocess.Popen(["sh", "-c", f'"{script}"'],
-                                      start_new_session=True)
-            try:
-                for _ in range(100):
-                    if mod.process_has_herdr(parent.pid):
-                        return
-                    time.sleep(0.02)
-                self.fail("never detected a herdr descendant")
-            finally:
-                os.killpg(os.getpgid(parent.pid), 9)
-                parent.wait()
 
 
 if __name__ == "__main__":

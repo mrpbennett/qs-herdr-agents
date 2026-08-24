@@ -5,6 +5,14 @@ All notable changes to the Herdr Agents plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-08-24
+
+### Fixed
+- Bar icon hover tooltip was broken: `PanelToolTip` bound to
+  `button.containsMouse`, but `BarIconButton` does not expose that property.
+  Replaced with the built-in `tooltipText` property on `BarIconButton`, which
+  uses the bar's own tooltip system.
+
 ## [0.2.1] — 2026-08-23
 
 ### Added

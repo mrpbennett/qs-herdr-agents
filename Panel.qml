@@ -184,6 +184,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
+    tooltipText: root.barSummary()
     iconComponent: Component {
       Item {
         id: barIcon
@@ -223,12 +224,6 @@ Panel {
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) service.refresh()
       else root.toggle()
-    }
-
-    PanelToolTip {
-      visible: !root.opened && button.containsMouse
-      text: root.barSummary()
-      fontFamily: root.fontFamily
     }
   }
 

@@ -170,16 +170,20 @@ Item {
     }
   }
 
-  // Pin blocked rows to the top: stable partition via move(), so every
-  // delegate survives and the rest keeps snapshot order. The panel tracks
-  // its keyboard cursor by paneId, so reordering cannot strand it.
+  // Order rows by status (blocked, working, done, then the rest): stable
+  // partition via move(), so every delegate survives and each group keeps
+  // snapshot order. The panel tracks its keyboard cursor by paneId, so
+  // reordering cannot strand it.
   function resortModel() {
     var model = root.agents
+    var order = ["blocked", "working", "done"]
     var insertAt = 0
-    for (var i = 0; i < model.count; i++) {
-      if (model.get(i).status === "blocked") {
-        if (i !== insertAt) model.move(i, insertAt, 1)
-        insertAt++
+    for (var o = 0; o < order.length; o++) {
+      for (var i = insertAt; i < model.count; i++) {
+        if (model.get(i).status === order[o]) {
+          if (i !== insertAt) model.move(i, insertAt, 1)
+          insertAt++
+        }
       }
     }
   }

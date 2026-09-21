@@ -40,32 +40,35 @@ function isActive(status) {
  * Build per-pane agent records from a parsed snapshot.
  *
  * @param {Object} snapshot  - the parsed snapshot object
- * @param {Object} stateByPane - mutable map of paneId → { status, enteredAt }
- * @returns {{ byPane: Object, counts: { active, working, blocked } }}
+ * @param {Object} enteredAtByPane - prior paneId → { status, enteredAt }
+ * @param {number} now - caller-provided current time in milliseconds
+ * @returns {{ byPane: Object, enteredAtByPane: Object, counts: Object }}
  */
-function buildRecords(snapshot, stateByPane) {
+function buildRecords(snapshot, enteredAtByPane, now) {
   var labelById = {}
   var workspaces = snapshot.workspaces || []
   for (var i = 0; i < workspaces.length; i++)
     labelById[workspaces[i].workspace_id] = String(workspaces[i].label || "")
+  var tabLabelById = {}
+  var tabs = snapshot.tabs || []
+  for (var t = 0; t < tabs.length; t++)
+    tabLabelById[tabs[t].tab_id] = String(tabs[t].label || "")
 
   var byPane = {}
   var agentsIn = snapshot.agents || []
   var totalActive = 0
   var totalWorking = 0
   var totalBlocked = 0
-  var now = Date.now()
+  var nextEnteredAtByPane = {}
 
   for (var a = 0; a < agentsIn.length; a++) {
     var agent = agentsIn[a]
     var status = String(agent.agent_status || "unknown")
     var paneId = String(agent.pane_id || "")
 
-    // Preserve the original entered-at timestamp when the status has not
-    // changed; start a new one when it has.
-    var prevStatus = stateByPane[paneId] ? stateByPane[paneId].status : ""
-    if (!stateByPane[paneId] || prevStatus !== status)
-      stateByPane[paneId] = { status: status, enteredAt: now }
+    var previous = enteredAtByPane[paneId]
+    var entered = previous && previous.status === status
+      ? previous.enteredAt : now
 
     var record = {
       name: String(agent.agent || "agent"),
@@ -76,10 +79,12 @@ function buildRecords(snapshot, stateByPane) {
       paneId: paneId,
       workspaceId: String(agent.workspace_id || ""),
       workspaceLabel: labelById[agent.workspace_id] || String(agent.workspace_id || ""),
+      tabLabel: tabLabelById[agent.tab_id] || "",
       focused: !!agent.focused,
-      enteredAt: stateByPane[paneId].enteredAt
+      enteredAt: entered
     }
     byPane[paneId] = record
+    nextEnteredAtByPane[paneId] = { status: status, enteredAt: entered }
     if (isActive(status)) totalActive++
     if (status === "working") totalWorking++
     if (status === "blocked") totalBlocked++
@@ -87,6 +92,7 @@ function buildRecords(snapshot, stateByPane) {
 
   return {
     byPane: byPane,
+    enteredAtByPane: nextEnteredAtByPane,
     counts: { active: totalActive, working: totalWorking, blocked: totalBlocked }
   }
 }
@@ -121,6 +127,59 @@ function diffRecords(prevByPane, currByPane) {
   return { added: added, removed: removed, transitions: transitions }
 }
 
+/**
+ * Create an empty timeline. A first snapshot establishes its baseline and
+ * deliberately produces no notification intents.
+ */
+function initialTimeline() {
+  return { baseline: false, byPane: {}, enteredAtByPane: {} }
+}
+
+function notificationIntents(previous, current) {
+  var intents = []
+  var diff = diffRecords(previous, current)
+  for (var i = 0; i < diff.removed.length; i++) {
+    var removed = previous[diff.removed[i]]
+    if (removed.status === "blocked") {
+      intents.push({ type: "agentGone", paneId: removed.paneId, name: removed.name,
+        workspaceLabel: removed.workspaceLabel, urgency: "normal" })
+    }
+  }
+  for (var j = 0; j < diff.transitions.length; j++) {
+    var transition = diff.transitions[j]
+    var record = transition.record
+    if (transition.from !== "blocked" && transition.to === "blocked") {
+      intents.push({ type: "blocked", paneId: record.paneId, name: record.name,
+        workspaceLabel: record.workspaceLabel, urgency: "critical" })
+    } else if (transition.from === "working" && transition.to === "done") {
+      intents.push({ type: "finished", paneId: record.paneId, name: record.name,
+        workspaceLabel: record.workspaceLabel, urgency: "normal" })
+    }
+  }
+  return intents
+}
+
+/**
+ * Evolve an Agent Timeline from one Herdr snapshot. The caller owns effects;
+ * this function returns display records and structured notification intents.
+ */
+function evolveTimeline(timeline, snapshot, now) {
+  var previous = timeline || initialTimeline()
+  var built = buildRecords(snapshot, previous.enteredAtByPane || {}, now)
+  return {
+    timeline: {
+      baseline: true,
+      byPane: built.byPane,
+      enteredAtByPane: built.enteredAtByPane
+    },
+    byPane: built.byPane,
+    counts: built.counts,
+    intents: previous.baseline
+      ? notificationIntents(previous.byPane || {}, built.byPane)
+      : []
+  }
+}
+
 // Node.js export for testing; no-op in QML (functions are imported by name).
 if (typeof module !== "undefined" && module.exports)
-  module.exports = { parse, basename, isActive, buildRecords, diffRecords }
+  module.exports = { parse, basename, isActive, initialTimeline, evolveTimeline }

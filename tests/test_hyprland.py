@@ -1,6 +1,7 @@
 """Unit tests for hyprland.py — the Hyprland Window Adapter."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,14 +13,49 @@ REPO = Path(__file__).parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from hyprland import HyprlandWindow  # noqa: E402
+from hyprland import HyprlandWindow, ProcfsProcessTree  # noqa: E402
 
 
-def _hl(checker=None):
+class FixtureProcessTree:
+    def __init__(self, matching=()):
+        self.matching = set(matching)
+
+    def hasNamedDescendant(self, pid, name):
+        return name == "herdr" and pid in self.matching
+
+
+def _hl(matching=()):
     """Create a HyprlandWindow with a fake hyprctl (never calls real hyprctl)."""
-    if checker is None:
-        checker = lambda pid: False  # noqa: E731
-    return HyprlandWindow(herdr_checker=checker, hyprctl_bin="/bin/true")
+    return HyprlandWindow(process_tree=FixtureProcessTree(matching),
+                          hyprctl_bin="/bin/true")
+
+
+class ProcfsProcessTreeTest(unittest.TestCase):
+    @staticmethod
+    def _process(root, pid, name, children_by_thread=None):
+        process = root / str(pid)
+        (process / "task").mkdir(parents=True)
+        (process / "comm").write_text(name + "\n")
+        for tid, children in (children_by_thread or {}).items():
+            thread = process / "task" / str(tid)
+            thread.mkdir()
+            (thread / "children").write_text(" ".join(str(child) for child in children))
+
+    def test_finds_named_descendant_in_any_thread_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._process(root, 10, "terminal", {10: [], 11: [12]})
+            self._process(root, 12, "herdr")
+            tree = ProcfsProcessTree(root)
+            self.assertTrue(tree.hasNamedDescendant(10, "herdr"))
+
+    def test_returns_false_for_missing_or_nonmatching_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._process(root, 10, "terminal")
+            tree = ProcfsProcessTree(root)
+            self.assertFalse(tree.hasNamedDescendant(10, "herdr"))
+            self.assertFalse(tree.hasNamedDescendant(99, "herdr"))
 
 
 # ---------------------------------------------------------------------------
@@ -88,14 +124,12 @@ def _unmapped(address, pid):
 
 class FindClientTest(unittest.TestCase):
     def test_prefers_visible_normal_workspace_window(self):
-        checker = lambda pid: True  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl({10, 11, 12})
         clients = [_special("0x1", 10), _hidden("0x2", 11), _visible("0x3", 12)]
         self.assertEqual(hl.findClient(clients)["address"], "0x3")
 
     def test_falls_back_to_special_then_hidden_then_unmapped(self):
-        checker = lambda pid: True  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl({10, 11})
         self.assertEqual(
             hl.findClient([_hidden("0x1", 10), _special("0x2", 11)])["address"],
             "0x2")
@@ -104,27 +138,23 @@ class FindClientTest(unittest.TestCase):
             "0x2")
 
     def test_keeps_compositor_order_on_ties(self):
-        checker = lambda pid: True  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl({10, 11})
         clients = [_visible("0x1", 10), _visible("0x2", 11)]
         self.assertEqual(hl.findClient(clients)["address"], "0x1")
 
     def test_returns_none_when_no_match(self):
-        checker = lambda pid: False  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl()
         self.assertIsNone(hl.findClient([_visible("0x1", 1)]))
         self.assertIsNone(hl.findClient([]))
 
     def test_skips_clients_without_pid_or_address(self):
-        checker = lambda pid: pid == 2  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl({2})
         clients = [{"address": "0x1"}, {"pid": 2}, _visible("0x2", 2)]
         self.assertEqual(hl.findClient(clients)["address"], "0x2")
 
     def test_proc_tree_wins_over_class(self):
         """When proc-tree and class both match, proc-tree should win."""
-        checker = lambda pid: True  # noqa: E731
-        hl = _hl(checker)
+        hl = _hl({10, 11})
         clients = [
             {"address": "0x1", "pid": 10, "mapped": True, "hidden": False,
              "workspace": {"id": 3, "name": "3"}, "class": "ghostty"},

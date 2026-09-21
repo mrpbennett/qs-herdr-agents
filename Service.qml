@@ -4,8 +4,8 @@ import Quickshell.Io
 import "snapshot.js" as Snap
 
 // Data layer for the Herdr Agents panel. Polls the Herdr session snapshot,
-// keeps a live ListModel of the running agents, and emits desktop toasts when
-// an agent needs attention or finishes background work.
+// keeps a live ListModel of the running agents, and renders desktop toasts from
+// Notification Intents produced by the Snapshot Adapter.
 //
 // One `herdr api snapshot` call returns everything the plugin needs: the
 // agents array (state, current activity title, cwd, pane/workspace ids) and
@@ -30,10 +30,8 @@ Item {
   // panelOpen lets the poll cadence tighten while the panel is on screen.
   property bool panelOpen: false
 
-  property var _prevByPane: ({})
-  property bool _baseline: false
+  property var _timeline: Snap.initialTimeline()
   property int _consecutiveFailures: 0
-  property var _enteredAt: ({})
 
   // ------------------------------------------------------------ settings
   function intSetting(name, fallback, min, max) {
@@ -98,46 +96,25 @@ Item {
   function applySnapshot(text) {
     var result = Snap.parse(text)
     if (result.error) {
-      root.error = result.error
+      root.handlePollFailure(result.error)
       return
     }
 
-    var built = Snap.buildRecords(result.snapshot, root._enteredAt)
-    var byPane = built.byPane
-    var counts = built.counts
+    var evolved = Snap.evolveTimeline(root._timeline, result.snapshot, Date.now())
+    root._timeline = evolved.timeline
 
-    if (root._baseline) {
-      var diff = Snap.diffRecords(root._prevByPane, byPane)
-      // Agents that vanished since the last poll: a blocked agent that is
-      // gone was either handled or died — worth surfacing either way.
-      for (var i = 0; i < diff.removed.length; i++)
-        root.detectExit(root._prevByPane[diff.removed[i]])
-      for (var j = 0; j < diff.transitions.length; j++)
-        root.detectTransition(
-          root._prevByPane[diff.transitions[j].paneId],
-          diff.transitions[j].record)
-      root._prevByPane = byPane
-    } else {
-      // First successful poll is the baseline; it must not announce agents
-      // that were already running when the plugin loaded.
-      root._baseline = true
-      root._prevByPane = byPane
-    }
-
-    root.syncModel(byPane)
+    root.syncModel(evolved.byPane)
     root.resortModel()
-    root.agentCount = Object.keys(byPane).length
-    root.activeCount = counts.active
-    root.workingCount = counts.working
-    root.blockedCount = counts.blocked
+    root.agentCount = Object.keys(evolved.byPane).length
+    root.activeCount = evolved.counts.active
+    root.workingCount = evolved.counts.working
+    root.blockedCount = evolved.counts.blocked
     root._consecutiveFailures = 0
 
-    // Emit a reconnect toast when herdr comes back online after being down.
-    var wasDown = !root.connected
     root.connected = true
     root.error = ""
-    if (wasDown && root._baseline)
-      root.notify("Herdr reconnected", "", "normal")
+    for (var i = 0; i < evolved.intents.length; i++)
+      root.notifyIntent(evolved.intents[i])
   }
 
   // Keep the ListModel updated in place so the panel's scroll position and
@@ -162,6 +139,7 @@ Item {
         item.folder = record.folder
         item.workspaceId = record.workspaceId
         item.workspaceLabel = record.workspaceLabel
+        item.tabLabel = record.tabLabel
         item.focused = record.focused
         item.enteredAt = record.enteredAt
       } else {
@@ -170,16 +148,20 @@ Item {
     }
   }
 
-  // Pin blocked rows to the top: stable partition via move(), so every
-  // delegate survives and the rest keeps snapshot order. The panel tracks
-  // its keyboard cursor by paneId, so reordering cannot strand it.
+  // Group rows by urgency (blocked, working, done, then the rest) with stable
+  // partitions via move(), so delegates survive and each group keeps snapshot
+  // order. The panel tracks its keyboard cursor by paneId, so reordering
+  // cannot strand it.
   function resortModel() {
     var model = root.agents
+    var order = ["blocked", "working", "done"]
     var insertAt = 0
-    for (var i = 0; i < model.count; i++) {
-      if (model.get(i).status === "blocked") {
-        if (i !== insertAt) model.move(i, insertAt, 1)
-        insertAt++
+    for (var o = 0; o < order.length; o++) {
+      for (var i = insertAt; i < model.count; i++) {
+        if (model.get(i).status === order[o]) {
+          if (i !== insertAt) model.move(i, insertAt, 1)
+          insertAt++
+        }
       }
     }
   }
@@ -194,31 +176,19 @@ Item {
     return "'" + safeHelper + "' '" + safePane + "'"
   }
 
-  function detectTransition(previous, current) {
-    var from = previous.status
-    var to = current.status
-    if (to === "blocked" && from !== "blocked") {
-      if (root.notifyOnBlocked) {
-        root.notify("Herdr · needs attention",
-          current.name + " is waiting for input in " + current.workspaceLabel,
-          "critical", root.jumpCommand(current.paneId))
-      }
-    } else if (from === "working" && to === "done") {
-      if (root.notifyOnFinished) {
-        root.notify("Herdr · finished",
-          current.name + " finished in " + current.workspaceLabel,
-          "normal", root.jumpCommand(current.paneId))
-      }
-    }
-  }
-
-  // The pane disappeared between polls. Only blocked agents announce this:
-  // a working agent vanishing usually means its tab was closed on purpose.
-  function detectExit(previous) {
-    if (previous.status === "blocked" && root.notifyOnBlocked) {
+  function notifyIntent(intent) {
+    if (intent.type === "blocked" && root.notifyOnBlocked) {
+      root.notify("Herdr · needs attention",
+        intent.name + " is waiting for input in " + intent.workspaceLabel,
+        intent.urgency, root.jumpCommand(intent.paneId))
+    } else if (intent.type === "finished" && root.notifyOnFinished) {
+      root.notify("Herdr · finished",
+        intent.name + " finished in " + intent.workspaceLabel,
+        intent.urgency, root.jumpCommand(intent.paneId))
+    } else if (intent.type === "agentGone" && root.notifyOnBlocked) {
       root.notify("Herdr · agent gone",
-        previous.name + " left " + previous.workspaceLabel + " while still blocked",
-        "normal")
+        intent.name + " left " + intent.workspaceLabel + " while still blocked",
+        intent.urgency)
     }
   }
 
@@ -234,6 +204,17 @@ Item {
     if (execCommand && execCommand !== "")
       cmd.push("--exec", execCommand)
     Quickshell.execDetached(cmd)
+  }
+
+  function handlePollFailure(detail) {
+    root._consecutiveFailures++
+    root.connected = false
+    root._timeline = Snap.initialTimeline()
+    root.agentCount = 0
+    root.activeCount = 0
+    root.workingCount = 0
+    root.blockedCount = 0
+    root.error = detail || "herdr is not reachable"
   }
 
   // ------------------------------------------------------------ polling
@@ -256,15 +237,7 @@ Item {
       if (exitCode === 0) {
         root.applySnapshot(pollOutput.text)
       } else {
-        root._consecutiveFailures++
-        root.connected = false
-        root._baseline = false
-        root._prevByPane = {}
-        root.agentCount = 0
-        root.activeCount = 0
-        root.workingCount = 0
-        root.blockedCount = 0
-        root.error = pollError.text.trim() || "herdr is not reachable"
+        root.handlePollFailure(pollError.text.trim())
       }
     }
   }

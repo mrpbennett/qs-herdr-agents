@@ -7,19 +7,20 @@ Verified API details and architecture for the Herdr Agents plugin.
 The codebase is split into focused modules with narrow interfaces:
 
 - **Snapshot Adapter** (`snapshot.js`): stateless pure functions that parse
-  `herdr api snapshot` output, build per-pane agent records, and diff
-  consecutive snapshots. Imported by `Service.qml` as `Snap`. Tested via
-  Node.js subprocess evaluation.
+  `herdr api snapshot` output and evolve the Agent Timeline into per-pane
+  records and Notification Intents. Imported by `Service.qml` as `Snap`.
+  Tested via Node.js subprocess evaluation.
 - **Hyprland Window Adapter** (`hyprland.py`): class-based module
   (`HyprlandWindow`) that owns all Hyprland interaction — client discovery,
-  process tree inspection, client ranking, special workspace management, and
-  window raising. Constructed with an injected `herdr_checker` callable for
-  testability.
+  process-tree inspection, client ranking, special workspace management, and
+  window raising. Its default process-tree adapter reads Linux procfs; tests
+  supply fixture-backed adapters.
 - **Focus Helper** (`bin/omarchy-herdr-focus`): thin orchestrator that focuses
   the agent inside Herdr TUI, then delegates to `HyprlandWindow` for window
   discovery and raising.
-- **Service** (`Service.qml`): polls, delegates parsing to the Snapshot
-  Adapter, keeps the ListModel in sync, detects transitions, emits toasts.
+- **Service** (`Service.qml`): polls, evolves the Agent Timeline through the
+  Snapshot Adapter, keeps the ListModel in sync, and renders Notification
+  Intents as toasts.
 - **Panel** (`Panel.qml`): bar icon and agent list UI.
 
 ## Snapshot Adapter interface
@@ -31,17 +32,18 @@ The codebase is split into focused modules with narrow interfaces:
 | `parse` | `(raw: string) → { snapshot, error }` | Parse raw JSON; error is a string on failure. |
 | `basename` | `(path: string) → string` | Derive basename from a path. |
 | `isActive` | `(status: string) → boolean` | True for working/blocked/done. |
-| `buildRecords` | `(snapshot, stateByPane) → { byPane, counts }` | Build per-pane agent records. Mutates `stateByPane` for enteredAt tracking. |
-| `diffRecords` | `(prevByPane, currByPane) → { added, removed, transitions }` | Diff two pane maps. |
+| `initialTimeline` | `() → timeline` | Create an empty Agent Timeline. |
+| `evolveTimeline` | `(timeline, snapshot, now) → { timeline, byPane, counts, intents }` | Evolve records, elapsed times, and Notification Intents without effects. |
 
-`Service.qml` calls `Snap.parse`, `Snap.buildRecords`, and `Snap.diffRecords`
-in `applySnapshot`. The `stateByPane` parameter is Service's `_enteredAt` map,
-which the adapter mutates to track when agents entered their current status.
+`Service.qml` calls `Snap.parse` and `Snap.evolveTimeline` in `applySnapshot`.
+It supplies the current time, synchronizes the returned records into its
+`ListModel`, and renders the returned Notification Intents as desktop toasts.
 
 ## Hyprland Window Adapter interface
 
-`HyprlandWindow.__init__(herdr_checker, hyprctl_bin)` — `herdr_checker` is a
-callable `(pid: int) -> bool` that walks `/proc` to detect a `herdr` process.
+`HyprlandWindow.__init__(process_tree, hyprctl_bin)` — `process_tree` is an
+optional adapter that answers whether a process tree contains a named process.
+Production defaults to `ProcfsProcessTree`; tests use fixture-backed adapters.
 
 | Method | Signature | Purpose |
 | --- | --- | --- |
@@ -71,9 +73,12 @@ Agent records used by the plugin:
 | `cwd` | Working directory; its basename is the folder shown. |
 | `pane_id` | Stable target for `herdr agent focus`. |
 | `workspace_id` | Key into the workspaces array. |
+| `tab_id` | Key into the tabs array. |
 | `focused` | Whether the agent is under the Herdr cursor. |
 
 Workspace records provide `workspace_id` → `label` (e.g. `qs-herdr-agents`).
+Tab records provide `tab_id` → `label`; this disambiguates agents within a
+workspace and is searchable in the panel.
 
 ## Poll cadence
 
@@ -81,12 +86,15 @@ A `Timer` runs a `Process` that executes `herdr api snapshot`. The interval is
 `refreshIntervalSec` (default 2s) normally, tightened to 1s while the panel is
 open. The `Process` guards on `running` so a poll can never overlap itself. On
 failure (server down, herdr missing) the plugin flips `connected = false`,
-drops its baseline, zeroes its counts (so the bar badge cannot go stale), and
-reports the error; the next successful poll re-baselines.
+resets its Agent Timeline, zeroes its counts (so the bar badge cannot go
+stale), and reports the error; the next successful poll establishes a silent
+baseline.
 
 ## Notifications
 
-Only real transitions notify, gated by settings and a first-poll baseline:
+The Agent Timeline derives Notification Intents only from real transitions;
+QML applies the settings gates and renders their visible wording. A first-poll
+or reconnect baseline emits no Notification Intents:
 
 | Transition | Toast | Urgency |
 | --- | --- | --- |
@@ -116,15 +124,16 @@ the agent.
 The agent `ListModel` is updated in place: panes no longer present are removed,
 new panes appended, and existing rows have their roles mutated. This preserves
 the panel's scroll offset and keyboard cursor across 2s polls. After syncing,
-`resortModel()` performs a stable partition via `ListModel.move()` so blocked
-rows sit at the top while everything else keeps snapshot order; because it
-moves delegates instead of rebuilding the model, no delegate state is lost.
+`resortModel()` performs stable partitions via `ListModel.move()` so blocked,
+working, and done rows appear in that order before idle and unknown rows. Each
+group keeps snapshot order; because it moves delegates instead of rebuilding
+the model, no delegate state is lost.
 
 Because rows can reorder mid-session, the panel's keyboard cursor tracks the
 selected agent by `paneId`, never by row index (`Panel.qml` keeps
 `selectedPane`; `hasCursor` compares against each row's `paneId`). The
 `Repeater` in `Panel.qml` binds roles (`name`, `status`, `title`, `folder`,
-`workspaceLabel`, `focused`) to `required property` delegates.
+`workspaceLabel`, `tabLabel`, `focused`) to `required property` delegates.
 
 ## Focus mechanics
 

@@ -15,15 +15,17 @@ verified API details.
 
 - `manifest.json`: Omarchy plugin metadata and bar-widget entry point.
 - `snapshot.js`: Snapshot Adapter — stateless pure functions for parsing
-  `herdr api snapshot` output, building agent records, and diffing per-pane
-  state between polls. Imported by `Service.qml`; tested via Node.js.
+  `herdr api snapshot` output and evolving the Agent Timeline into records and
+  Notification Intents, including workspace and tab labels. Imported by
+  `Service.qml`; tested via Node.js.
 - `Service.qml`: the data layer. Polls `herdr api snapshot` on a timer,
-  delegates parsing to the Snapshot Adapter, keeps a live `ListModel` of
-  agents, detects state transitions, and emits Omarchy desktop toasts.
+  evolves the Agent Timeline through the Snapshot Adapter, keeps a live
+  `ListModel` of agents, and renders Omarchy desktop toasts from Notification
+  Intents.
 - `hyprland.py`: Hyprland Window Adapter — class-based module that owns all
-  Hyprland interaction: client discovery (`hyprctl -j clients`), process tree
+  Hyprland interaction: client discovery (`hyprctl -j clients`), process-tree
   inspection, client ranking, special workspace management, and window raising.
-  Constructed with an injected `herdr_checker` for testability.
+  Its default procfs adapter is replaced with fixtures in tests.
 - `Panel.qml`: the bar icon (tint + busy-count badge) and the
   `KeyboardPanel` agent list. Clicking or Entering a row calls
   `service.focusAgent(paneId)`.
@@ -41,8 +43,8 @@ verified API details.
 
 `Service.qml` polls `herdr api snapshot` every `refreshIntervalSec` (default
 2s; 1s while the panel is open). The first successful poll establishes a
-baseline — no notifications for agents already running. Later polls diff
-per-pane state:
+baseline — no notifications for agents already running. The Snapshot Adapter
+evolves later polls into Notification Intents for per-pane state changes:
 
 - into `blocked` → toast "needs attention" (critical) when `notifyOnBlocked`
 - `working` → `done` → toast "finished" (normal) when `notifyOnFinished`
@@ -56,9 +58,9 @@ agent. Toasts go through `$OMARCHY_PATH/bin/omarchy-notification-send` via
 
 The ListModel is updated in place (roles mutated, items appended/removed) so
 the panel keeps its scroll position across polls; `resortModel()` then does a
-stable partition (`ListModel.move`) pinning blocked rows to the top. The
-panel's keyboard cursor tracks the selected agent by `paneId`, never by row
-index, so reordering cannot strand it.
+stable partitions (`ListModel.move`) grouping blocked, working, and done rows
+ahead of idle and unknown rows. The panel's keyboard cursor tracks the selected
+agent by `paneId`, never by row index, so reordering cannot strand it.
 
 A click calls the focus helper through a guarded Quickshell `Process`
 (`Service.qml`), passing `<paneId>` and the optional `windowClass` setting;
@@ -95,6 +97,8 @@ both run the same focus helper path.
 
 - The first successful snapshot after (re)load is the baseline; never notify
   for state "changes" that merely reflect plugin startup.
+- A failed poll resets the Agent Timeline; the next successful snapshot is a
+  silent baseline because missed state cannot be interpreted as a transition.
 - Notify only on real transitions (`blocked` entry, `working`→`done`); never
   spam on re-polls of a stable state.
 - Neither the polling Process nor the click-to-jump Process may ever be
@@ -102,7 +106,7 @@ both run the same focus helper path.
 - Keep the in-place model sync: never `clear()`+`append()` the ListModel,
   which would reset panel scroll/cursor.
 - The panel keyboard cursor is keyed by `paneId`, never row index; reordering
-  (blocked pinned to top) must not strand or retarget the cursor.
+  (status groups pinned to the top) must not strand or retarget the cursor.
 - The focus helper identifies the Herdr window by process tree, never by
   window title: Herdr sets the title to `{hostname}: {workspace}`, which
   changes as the active workspace changes. The class fallback only applies

@@ -132,4 +132,48 @@ terminals run herdr. Failed jumps must be visible instead of silent.
   reset the baseline first, so they never fire false "agent gone" toasts.
 - Launch button uses Omarchy's own herdr terminal launcher rather than
   guessing a terminal emulator.
-- 26 unit tests pass; manifest validates with the new string schema entry.
+- 60 unit tests pass; manifest validates with the new string schema entry.
+
+## Round 4 — richer agent context and quieter recovery
+
+- [x] Remove the reconnect toast, which currently fires after every transient
+      polling failure.
+- [x] Carry snapshot tab labels into agent records and render them beside the
+      workspace label.
+- [x] Extend panel filtering to current activity titles and tab labels.
+- [x] Stably group rows as blocked, working, done, then idle/unknown while
+      preserving delegate identity and pane-keyed keyboard selection.
+- [x] Add snapshot adapter coverage for tab-label joins and missing tabs.
+- [x] Update user and design documentation to match the changed panel and
+      notification behavior.
+- [x] Run the unit suite, shell syntax checks, plugin validation, and diff
+      whitespace check.
+
+### Review
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` passes
+  (60 tests).
+- `bash -n install.sh uninstall.sh`, `omarchy plugin validate .`, and
+  `git diff --check` pass.
+
+## Round 5 — deepen temporal state and window discovery
+
+- [x] Replace the split snapshot, baseline, entered-time, and notification
+      policy with one deterministic Agent Timeline module interface.
+- [x] Keep QML responsible only for process, ListModel, and visible-text
+      effects; give it structured Notification Intents from the timeline.
+- [x] Reset the timeline silently after a polling failure and prune pane state
+      when panes disappear.
+- [x] Move `/proc` process-tree inspection behind the Hyprland Window Adapter
+      and remove that platform detail from the focus helper.
+- [x] Replace the live child-process inspection test with fixture-backed
+      process-tree adapter tests.
+- [x] Update design and agent documentation, then run the full verification
+      suite.
+
+### Review
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` passes
+  (60 tests).
+- `bash -n install.sh uninstall.sh`, `omarchy plugin validate .`, and
+  `git diff --check` pass.

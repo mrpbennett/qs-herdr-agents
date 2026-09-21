@@ -61,35 +61,6 @@ def focus_in_herdr(target: str) -> tuple[bool, str]:
     return True, ""
 
 
-def process_has_herdr(pid: int) -> bool:
-    """True if the process tree rooted at *pid* contains a process named herdr."""
-    seen: set[int] = set()
-    stack: list[int] = [pid]
-    while stack:
-        current = stack.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        try:
-            with open(f"/proc/{current}/comm", encoding="utf-8") as handle:
-                comm = handle.read().strip()
-        except OSError:
-            continue
-        if comm == "herdr":
-            return True
-        try:
-            task_dir = f"/proc/{current}/task"
-            for tid in os.listdir(task_dir):
-                try:
-                    with open(f"{task_dir}/{tid}/children", encoding="utf-8") as handle:
-                        stack.extend(int(child) for child in handle.read().split())
-                except OSError:
-                    continue
-        except OSError:
-            continue
-    return False
-
-
 def main(argv: list[str]) -> int:
     if len(argv) not in (1, 2) or not argv[0].strip():
         print(__doc__, file=sys.stderr)
@@ -102,7 +73,7 @@ def main(argv: list[str]) -> int:
     if not ok:
         print(f"omarchy-herdr-focus: herdr focus: {detail}", file=sys.stderr)
 
-    hl = HyprlandWindow(herdr_checker=process_has_herdr)
+    hl = HyprlandWindow()
 
     clients = hl.hyprctlClients()
     if clients is None:

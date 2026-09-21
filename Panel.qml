@@ -370,6 +370,7 @@ Panel {
               required property string folder
               required property string paneId
               required property string workspaceLabel
+              required property string tabLabel
               required property bool focused
               required property double enteredAt
 
@@ -377,6 +378,8 @@ Panel {
                 || name.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
                 || folder.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
                 || workspaceLabel.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
+                || tabLabel.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
+                || title.toLowerCase().indexOf(root.filterText.toLowerCase()) >= 0
               width: parent.width
               agentName: name
               agentStatus: status
@@ -384,6 +387,7 @@ Panel {
               agentCwd: cwd
               agentFolder: folder
               agentWorkspace: workspaceLabel
+              agentTab: tabLabel
               isFocused: focused
               agentEnteredAt: enteredAt
               hasCursor: root.cursorActive && root.selectedPane === paneId
@@ -484,8 +488,8 @@ Panel {
     }
   }
 
-  // One agent row: status dot + name, the agent's current activity title,
-  // and the Herdr workspace it is running in.
+  // One agent row: status dot + name, current activity title, and its Herdr
+  // workspace and tab.
   component AgentRow: CursorSurface {
     id: row
     property string agentName: ""
@@ -494,6 +498,7 @@ Panel {
     property string agentCwd: ""
     property string agentFolder: ""
     property string agentWorkspace: ""
+    property string agentTab: ""
     property bool isFocused: false
     property bool mouseHover: false
     property double agentEnteredAt: 0
@@ -555,7 +560,9 @@ Panel {
           }
 
           Text {
-            text: row.agentWorkspace
+            text: row.agentTab !== ""
+              ? row.agentWorkspace + " · " + row.agentTab
+              : row.agentWorkspace
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

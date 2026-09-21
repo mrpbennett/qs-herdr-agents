@@ -28,15 +28,15 @@ Click the icon to open a list, one row per agent:
 - status dot + label (`WORKING`, `BLOCKED`, `DONE`, `IDLE`, `UNKNOWN`),
 - agent name,
 - the agent's **current activity** (its live terminal title),
-- the **Herdr workspace** it is in, and the project folder,
+- the **Herdr workspace and tab** it is in, and the project folder,
 - a `FOCUSED` mark on the agent currently under the Herdr cursor,
 - elapsed time in the current status (e.g. "3m 12s").
 
-Blocked agents are pinned to the top. If herdr is not running, the panel
-offers a **Launch Herdr** button.
+Agents are grouped by status: blocked, working, done, then idle or unknown.
+If herdr is not running, the panel offers a **Launch Herdr** button.
 
-Type `/` or `f` to filter agents by name, workspace, or folder. Press
-Escape to clear.
+Type `/` or `f` to filter agents by name, activity, workspace, tab, or folder.
+Press Escape to clear.
 
 ### Notifications
 
@@ -47,7 +47,6 @@ Desktop toasts when agents change state (toggleable in plugin settings):
 | **Needs attention** | agent entered `blocked` | critical |
 | **Finished** | working agent transitioned to `done` | normal |
 | **Agent gone** | blocked agent's pane vanished between polls | normal |
-| **Herdr reconnected** | herdr came back online after being down | normal |
 
 Clicking a **needs attention** or **finished** toast jumps straight to that
 agent.
@@ -165,10 +164,10 @@ The codebase is split into focused modules with narrow interfaces:
 
 | Module | Purpose |
 | --- | --- |
-| `snapshot.js` | **Snapshot Adapter** — stateless pure functions for parsing `herdr api snapshot` output, building per-pane agent records, and diffing consecutive snapshots. Imported by `Service.qml` as `Snap`. |
-| `hyprland.py` | **Hyprland Window Adapter** — class-based module (`HyprlandWindow`) owning all Hyprland interaction: client discovery, process tree inspection, ranking, special workspace management, and window raising. |
+| `snapshot.js` | **Snapshot Adapter** — stateless pure functions for parsing `herdr api snapshot` output and evolving the per-pane Agent Timeline into records and notification intents. Imported by `Service.qml` as `Snap`. |
+| `hyprland.py` | **Hyprland Window Adapter** — class-based module (`HyprlandWindow`) owning all Hyprland interaction: client discovery, process-tree inspection, ranking, special workspace management, and window raising. |
 | `bin/omarchy-herdr-focus` | **Focus Helper** — thin orchestrator that focuses the agent inside Herdr TUI, then delegates to `HyprlandWindow` for window discovery and raising. |
-| `Service.qml` | **Data Layer** — polls `herdr api snapshot`, delegates parsing to the Snapshot Adapter, keeps the ListModel in sync, detects state transitions, emits toasts. |
+| `Service.qml` | **Data Layer** — polls `herdr api snapshot`, evolves the Agent Timeline through the Snapshot Adapter, keeps the ListModel in sync, and renders notification intents. |
 | `Panel.qml` | **UI** — bar icon and agent list panel. |
 
 ### Data source

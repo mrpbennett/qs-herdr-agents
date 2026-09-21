@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Protocol
 
 _HYPRCTL_TIMEOUT: int = 3  # seconds — hyprctl queries are fast
 
@@ -22,22 +23,57 @@ def _run(cmd: list[str], *, timeout: int = 10) -> subprocess.CompletedProcess[st
                           timeout=timeout)
 
 
+class ProcessTree(Protocol):
+    """Adapter for inspecting named descendants of a process."""
+
+    def hasNamedDescendant(self, pid: int, name: str) -> bool:
+        """Return whether *pid*'s process tree contains *name*."""
+
+
+class ProcfsProcessTree:
+    """Linux process-tree adapter backed by procfs."""
+
+    def __init__(self, proc_root: Path = Path("/proc")) -> None:
+        self._proc_root = proc_root
+
+    def hasNamedDescendant(self, pid: int, name: str) -> bool:
+        seen: set[int] = set()
+        stack: list[int] = [pid]
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            process_dir = self._proc_root / str(current)
+            try:
+                if (process_dir / "comm").read_text(encoding="utf-8").strip() == name:
+                    return True
+                for thread_dir in (process_dir / "task").iterdir():
+                    try:
+                        children = (thread_dir / "children").read_text(encoding="utf-8")
+                        stack.extend(int(child) for child in children.split())
+                    except (OSError, ValueError):
+                        continue
+            except OSError:
+                continue
+        return False
+
+
 class HyprlandWindow:
     """Adapter for Hyprland window discovery and manipulation.
 
     Args:
-        herdr_checker: A callable ``(pid: int) -> bool`` that returns True
-            when a process tree rooted at *pid* contains a ``herdr`` process.
-            Injected for testability.
+        process_tree: Process-tree adapter. Defaults to Linux procfs; fixture
+            adapters support deterministic tests.
         hyprctl_bin: Path to the ``hyprctl`` binary.
     """
 
     def __init__(
         self,
-        herdr_checker: Any,
+        process_tree: ProcessTree | None = None,
         hyprctl_bin: str = os.environ.get("HYPRCTL_BIN", "hyprctl"),
     ) -> None:
-        self._is_herdr = herdr_checker
+        self._process_tree = process_tree or ProcfsProcessTree()
         self._hyprctl = hyprctl_bin
 
     # ------------------------------------------------------------------
@@ -52,7 +88,7 @@ class HyprlandWindow:
         for client in clients or []:
             pid = client.get("pid")
             address = client.get("address")
-            if pid and address and self._is_herdr(pid):
+            if pid and address and self._process_tree.hasNamedDescendant(pid, "herdr"):
                 matches.append(client)
         if not matches:
             return None

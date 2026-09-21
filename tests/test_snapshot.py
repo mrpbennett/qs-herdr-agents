@@ -34,24 +34,27 @@ def js_eval(func_name, *args):
 # Helpers to build valid snapshot payloads
 # ---------------------------------------------------------------------------
 
-def _snapshot(agents=None, workspaces=None):
+def _snapshot(agents=None, workspaces=None, tabs=None):
     return {
         "result": {
             "snapshot": {
                 "agents": agents or [],
                 "workspaces": workspaces or [],
+                "tabs": tabs or [],
             }
         }
     }
 
 
 def _agent(name="opencode", status="working", pane_id="w1:p1",
-           workspace_id="1", cwd="/home/user/project", title="coding", focused=False):
+           workspace_id="1", tab_id="", cwd="/home/user/project", title="coding",
+           focused=False):
     return {
         "agent": name,
         "agent_status": status,
         "pane_id": pane_id,
         "workspace_id": workspace_id,
+        "tab_id": tab_id,
         "cwd": cwd,
         "terminal_title_stripped": title,
         "focused": focused,
@@ -60,6 +63,10 @@ def _agent(name="opencode", status="working", pane_id="w1:p1",
 
 def _workspace(wid="1", label="my-project"):
     return {"workspace_id": wid, "label": label}
+
+
+def _tab(tab_id="t1", label="implementation"):
+    return {"tab_id": tab_id, "label": label}
 
 
 # ---------------------------------------------------------------------------
@@ -116,31 +123,34 @@ class BasenameTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# buildRecords()
+# Agent Timeline
 # ---------------------------------------------------------------------------
 
-class BuildRecordsTest(unittest.TestCase):
-    def _build(self, agents, workspaces=None, state=None):
-        snap = _snapshot(agents=agents, workspaces=workspaces)
+class AgentTimelineTest(unittest.TestCase):
+    def _evolve(self, timeline, agents, workspaces=None, tabs=None, now=1000):
+        snap = _snapshot(agents=agents, workspaces=workspaces, tabs=tabs)
         snapshot = js_eval("parse", json.dumps(snap))["snapshot"]
-        return js_eval("buildRecords", snapshot, state or {})
+        return js_eval("evolveTimeline", timeline, snapshot, now)
 
-    def test_single_agent(self):
-        result = self._build([_agent(name="claude", pane_id="w1:p1")])
+    def test_first_snapshot_establishes_baseline_without_intents(self):
+        result = self._evolve(js_eval("initialTimeline"), [
+            _agent(name="claude", pane_id="w1:p1", status="blocked")
+        ])
         records = result["byPane"]
         self.assertIn("w1:p1", records)
         self.assertEqual(records["w1:p1"]["name"], "claude")
-        self.assertEqual(records["w1:p1"]["status"], "working")
+        self.assertEqual(records["w1:p1"]["status"], "blocked")
+        self.assertEqual(result["intents"], [])
         self.assertEqual(result["counts"]["active"], 1)
-        self.assertEqual(result["counts"]["working"], 1)
+        self.assertEqual(result["counts"]["blocked"], 1)
 
-    def test_multiple_agents(self):
+    def test_counts_and_records(self):
         agents = [
             _agent(name="a", pane_id="w1:p1", status="working"),
             _agent(name="b", pane_id="w1:p2", status="blocked"),
             _agent(name="c", pane_id="w2:p1", status="idle"),
         ]
-        result = self._build(agents)
+        result = self._evolve(js_eval("initialTimeline"), agents)
         self.assertEqual(result["counts"]["active"], 2)  # working + blocked
         self.assertEqual(result["counts"]["working"], 1)
         self.assertEqual(result["counts"]["blocked"], 1)
@@ -149,100 +159,77 @@ class BuildRecordsTest(unittest.TestCase):
     def test_workspace_label_joined(self):
         workspaces = [_workspace(wid="42", label="qs-herdr")]
         agents = [_agent(workspace_id="42")]
-        result = self._build(agents, workspaces=workspaces)
+        result = self._evolve(js_eval("initialTimeline"), agents, workspaces=workspaces)
         self.assertEqual(result["byPane"]["w1:p1"]["workspaceLabel"], "qs-herdr")
+
+    def test_tab_label_joined(self):
+        tabs = [_tab(tab_id="t42", label="review")]
+        agents = [_agent(tab_id="t42")]
+        result = self._evolve(js_eval("initialTimeline"), agents, tabs=tabs)
+        self.assertEqual(result["byPane"]["w1:p1"]["tabLabel"], "review")
+
+    def test_tab_label_empty_without_matching_tab(self):
+        result = self._evolve(js_eval("initialTimeline"), [_agent(tab_id="missing")], tabs=[_tab()])
+        self.assertEqual(result["byPane"]["w1:p1"]["tabLabel"], "")
 
     def test_folder_from_cwd(self):
         agents = [_agent(cwd="/home/user/my-project")]
-        result = self._build(agents)
+        result = self._evolve(js_eval("initialTimeline"), agents)
         self.assertEqual(result["byPane"]["w1:p1"]["folder"], "my-project")
 
-    def test_preserves_entered_at_from_state(self):
-        state = {"w1:p1": {"status": "working", "enteredAt": 1000}}
-        agents = [_agent(status="working")]
-        result = self._build(agents, state=state)
+    def test_preserves_entered_at_for_same_status(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="working")], now=1000)
+        result = self._evolve(first["timeline"], [_agent(status="working")], now=2000)
         self.assertEqual(result["byPane"]["w1:p1"]["enteredAt"], 1000)
 
     def test_resets_entered_at_on_status_change(self):
-        state = {"w1:p1": {"status": "working", "enteredAt": 1000}}
-        agents = [_agent(status="blocked")]
-        result = self._build(agents, state=state)
-        self.assertNotEqual(result["byPane"]["w1:p1"]["enteredAt"], 1000)
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="working")], now=1000)
+        result = self._evolve(first["timeline"], [_agent(status="blocked")], now=2000)
+        self.assertEqual(result["byPane"]["w1:p1"]["enteredAt"], 2000)
 
     def test_empty_agents(self):
-        result = self._build([])
+        result = self._evolve(js_eval("initialTimeline"), [])
         self.assertEqual(result["byPane"], {})
         self.assertEqual(result["counts"]["active"], 0)
 
     def test_defaults_for_missing_fields(self):
         agents = [{"agent_status": "working", "pane_id": "w1:p1"}]
-        result = self._build(agents)
+        result = self._evolve(js_eval("initialTimeline"), agents)
         record = result["byPane"]["w1:p1"]
         self.assertEqual(record["name"], "agent")
         self.assertEqual(record["cwd"], "")
         self.assertEqual(record["title"], "")
 
+    def test_blocked_transition_returns_structured_intent(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="working")])
+        result = self._evolve(first["timeline"], [_agent(status="blocked")])
+        self.assertEqual(result["intents"], [{
+            "type": "blocked", "paneId": "w1:p1", "name": "opencode",
+            "workspaceLabel": "1", "urgency": "critical",
+        }])
 
-# ---------------------------------------------------------------------------
-# diffRecords()
-# ---------------------------------------------------------------------------
+    def test_working_to_done_returns_finished_intent(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="working")])
+        result = self._evolve(first["timeline"], [_agent(status="done")])
+        self.assertEqual(result["intents"][0]["type"], "finished")
+        self.assertEqual(result["intents"][0]["urgency"], "normal")
 
-class DiffRecordsTest(unittest.TestCase):
-    def test_no_change(self):
-        prev = {"w1:p1": {"status": "working"}}
-        curr = {"w1:p1": {"status": "working"}}
-        result = js_eval("diffRecords", prev, curr)
-        self.assertEqual(result["added"], [])
-        self.assertEqual(result["removed"], [])
-        self.assertEqual(len(result["transitions"]), 1)
-        self.assertEqual(result["transitions"][0]["from"], "working")
-        self.assertEqual(result["transitions"][0]["to"], "working")
+    def test_removed_blocked_pane_returns_agent_gone_intent_and_prunes_state(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="blocked")], now=1000)
+        result = self._evolve(first["timeline"], [], now=2000)
+        self.assertEqual(result["intents"][0]["type"], "agentGone")
+        self.assertEqual(result["timeline"]["enteredAtByPane"], {})
 
-    def test_added_pane(self):
-        curr = {"w1:p1": {"status": "working"}}
-        result = js_eval("diffRecords", {}, curr)
-        self.assertEqual(result["added"], ["w1:p1"])
-        self.assertEqual(result["removed"], [])
+    def test_removed_working_pane_does_not_return_intent(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent(status="working")])
+        result = self._evolve(first["timeline"], [])
+        self.assertEqual(result["intents"], [])
 
-    def test_removed_pane(self):
-        prev = {"w1:p1": {"status": "working"}}
-        result = js_eval("diffRecords", prev, {})
-        self.assertEqual(result["removed"], ["w1:p1"])
-        self.assertEqual(result["added"], [])
-
-    def test_transition(self):
-        prev = {"w1:p1": {"status": "working", "name": "opencode"}}
-        curr = {"w1:p1": {"status": "done", "name": "opencode"}}
-        result = js_eval("diffRecords", prev, curr)
-        self.assertEqual(len(result["transitions"]), 1)
-        t = result["transitions"][0]
-        self.assertEqual(t["from"], "working")
-        self.assertEqual(t["to"], "done")
-        self.assertEqual(t["paneId"], "w1:p1")
-
-    def test_mixed_changes(self):
-        prev = {
-            "w1:p1": {"status": "working"},
-            "w1:p2": {"status": "blocked"},
-        }
-        curr = {
-            "w1:p1": {"status": "working"},   # no change
-            "w1:p3": {"status": "idle"},       # added
-            # w1:p2 removed
-        }
-        result = js_eval("diffRecords", prev, curr)
-        self.assertEqual(result["added"], ["w1:p3"])
-        self.assertEqual(result["removed"], ["w1:p2"])
-        self.assertEqual(len(result["transitions"]), 1)
-        self.assertEqual(result["transitions"][0]["paneId"], "w1:p1")
-        self.assertEqual(result["transitions"][0]["from"], "working")
-        self.assertEqual(result["transitions"][0]["to"], "working")
-
-    def test_empty_both(self):
-        result = js_eval("diffRecords", {}, {})
-        self.assertEqual(result["added"], [])
-        self.assertEqual(result["removed"], [])
-        self.assertEqual(result["transitions"], [])
+    def test_reappearing_pane_starts_a_new_elapsed_time(self):
+        first = self._evolve(js_eval("initialTimeline"), [_agent()], now=1000)
+        missing = self._evolve(first["timeline"], [], now=2000)
+        result = self._evolve(missing["timeline"], [_agent()], now=3000)
+        self.assertEqual(result["byPane"]["w1:p1"]["enteredAt"], 3000)
 
 
 if __name__ == "__main__":
